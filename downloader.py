@@ -616,9 +616,6 @@ def update_provider_status_widgets():
         color = HEALTH_COLORS[status]
         draw_platform_icon(widgets["canvas"], provider, color)
         widgets["status_label"].config(text=status_text, foreground=color)
-        detail = provider_detail_text(provider)
-        for tooltip in widgets["tooltips"]:
-            tooltip.text = detail
 
 def record_provider_check(url, error_message=None):
     provider = provider_from_url(url)
@@ -653,14 +650,11 @@ def create_provider_status_widget(parent, provider, column):
     status_label.grid(row=3, column=0, pady=(1, 0))
 
     clickable_widgets = (card, icon_canvas, name_label, mode_label, status_label)
-    tooltips = []
     for widget in clickable_widgets:
         widget.bind("<Button-1>", lambda _event: show_about_dialog())
-        tooltips.append(ToolTip(widget, provider_detail_text(provider)))
     provider_status_widgets[provider] = {
         "canvas": icon_canvas,
         "status_label": status_label,
-        "tooltips": tooltips,
     }
     draw_platform_icon(icon_canvas, provider, HEALTH_COLORS["checking"])
 
@@ -713,8 +707,8 @@ def show_about_dialog():
 
     links = ttk.Frame(content)
     links.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(14, 0))
-    ttk.Button(links, text="Project & Issues", command=lambda: open_external_url(PROJECT_URL, "Project & Issues")).grid(row=0, column=0, padx=(0, 6))
-    ttk.Button(links, text="More AweDev Links", command=lambda: open_external_url(LINKTREE_URL, "AweDev Links")).grid(row=0, column=1, padx=(0, 6))
+    ttk.Button(links, text="About Project", command=lambda: open_external_url(PROJECT_URL, "About Project")).grid(row=0, column=0, padx=(0, 6))
+    ttk.Button(links, text="About AweDev", command=lambda: open_external_url(LINKTREE_URL, "About AweDev")).grid(row=0, column=1, padx=(0, 6))
     ttk.Button(links, text="Close", command=close_about).grid(row=0, column=2)
 
     about_window.protocol("WM_DELETE_WINDOW", close_about)
@@ -1437,10 +1431,22 @@ class ToolTip:
         self.widget = widget
         self.text = text
         self.tip_window = None
-        widget.bind("<Enter>", self.show)
-        widget.bind("<Leave>", self.hide)
+        self.hide_job = None
+        self.bind_widget(widget)
+
+    def bind_widget(self, widget):
+        widget.bind("<Enter>", self.show, add="+")
+        widget.bind("<Leave>", self.schedule_hide, add="+")
+
+    def bind_tree(self, widget):
+        self.bind_widget(widget)
+        for child in widget.winfo_children():
+            self.bind_tree(child)
 
     def show(self, event=None):
+        if self.hide_job:
+            self.widget.after_cancel(self.hide_job)
+            self.hide_job = None
         if self.tip_window or not self.text:
             return
 
@@ -1463,7 +1469,13 @@ class ToolTip:
         )
         label.pack()
 
-    def hide(self, event=None):
+    def schedule_hide(self, event=None):
+        if self.hide_job:
+            self.widget.after_cancel(self.hide_job)
+        self.hide_job = self.widget.after(60, self.hide)
+
+    def hide(self):
+        self.hide_job = None
         if self.tip_window:
             self.tip_window.destroy()
             self.tip_window = None
@@ -1562,8 +1574,29 @@ app_title_label = ttk.Label(
 )
 app_title_label.grid(row=0, column=0, sticky="w")
 
-info_button = ttk.Button(app_header_frame, text="ⓘ", width=3, command=show_about_dialog)
+info_button = tk.Canvas(
+    app_header_frame,
+    width=28,
+    height=28,
+    borderwidth=0,
+    highlightthickness=0,
+    background=root.cget("background"),
+    cursor="hand2",
+    takefocus=True,
+)
 info_button.grid(row=0, column=1, sticky="e")
+
+def draw_info_button(color="#5f6368"):
+    info_button.delete("all")
+    info_button.create_oval(3, 3, 25, 25, outline=color, width=2)
+    info_button.create_text(14, 14, text="i", fill=color, font=("Segoe UI", 12, "bold"))
+
+draw_info_button()
+info_button.bind("<Button-1>", lambda _event: show_about_dialog())
+info_button.bind("<Return>", lambda _event: show_about_dialog())
+info_button.bind("<space>", lambda _event: show_about_dialog())
+info_button.bind("<Enter>", lambda _event: draw_info_button("#202124"), add="+")
+info_button.bind("<Leave>", lambda _event: draw_info_button(), add="+")
 ToolTip(info_button, "About, supported media, project links, and current availability.")
 
 availability_frame = ttk.LabelFrame(main_frame, text="Media support", padding=(10, 7))
@@ -1572,6 +1605,9 @@ for provider_column in range(len(Provider)):
     availability_frame.columnconfigure(provider_column, weight=1)
 for provider_column, provider in enumerate(Provider):
     create_provider_status_widget(availability_frame, provider, provider_column)
+media_support_tooltip = ToolTip(availability_frame, "Click for supported media details and current availability.")
+for provider_card in availability_frame.winfo_children():
+    media_support_tooltip.bind_tree(provider_card)
 
 source_frame = ttk.LabelFrame(main_frame, text="Source", padding=10)
 source_frame.grid(row=2, column=0, sticky="ew", pady=(12, 0))
