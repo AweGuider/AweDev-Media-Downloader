@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Make the YouTube downloader ready for a public GitHub release: installable by non-developer Windows users, reliable against common YouTube/yt-dlp breakage, clean enough to maintain, and clear about ownership/license.
+Make AweDev Media Downloader ready for a public GitHub release: installable by non-developer Windows users, reliable across its supported providers and downloader dependencies, clean enough to maintain, and clear about ownership/license.
 
 ## Assumptions
 

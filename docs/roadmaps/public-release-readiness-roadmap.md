@@ -6,7 +6,7 @@ Sequence the work from `docs/specs/public-release-readiness-spec.md` so the proj
 
 ## Confirmed Facts
 
-- The app is currently a small Python/Tkinter YouTube downloader.
+- The app is a Windows-first Python/Tkinter media downloader with provider adapters for YouTube, Instagram, Facebook, and TikTok.
 - The public-release spec is the source of truth for required behavior.
 - First release is assumed Windows-first.
 - Existing TODO comments in `downloader.py` should remain until their matching issue is implemented, superseded, explicitly de-scoped, or preserved elsewhere.
@@ -22,6 +22,7 @@ Fix distribution and diagnostics first, because public users need the app to sta
 - 2026-08-24: Phase 3 passed. Video download, repeated same-URL download, audio-only MP3, failure cleanup, and close-during-download behavior were manually verified. UI follow-up discovered during validation: fetched resolution choices can apply correctly under the hood while the dropdown display stays on the previously shown highest option.
 - 2026-08-24: Phase 4 passed. The public UI now has grouped controls, paste/test-link actions, mode-aware quality/format controls, a compact diagnostics panel, saved settings, an app icon, and fixed URL-field keyboard shortcuts.
 - 2026-08-24: Phase 5 is partially complete. Public README, MIT license, v1.0.0 release notes, ignore hygiene, and third-party notice guidance are in place. Remaining release gate: build the final artifact, include exact third-party license files/notices, and verify that artifact on a clean Windows machine.
+- 2026-09-09: The v2.0.0 multi-provider update is implemented, the repository is now `AweDev-Media-Downloader`, and release-facing names and links are aligned. Remaining release gates are the final licensed artifact build and clean-machine verification.
 
 ## Phase 1: Reproducible Packaging Baseline
 
@@ -223,4 +224,4 @@ Review the repo as a new visitor: clone/build instructions work, generated artif
 
 ## Recommended Next Step
 
-Build the final v1.0.0 release artifact, include exact third-party license files/notices, and verify that artifact on a clean Windows machine.
+Build the final v2.0.0 release artifact, include exact third-party license files/notices, and verify that artifact on a clean Windows machine.

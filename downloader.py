@@ -49,10 +49,10 @@ from media_downloader.url_feedback import provider_from_url, user_facing_media_e
 # python -m PyInstaller --onefile downloader.py
 
 APP_NAME = "AweDev Media Downloader"
-APP_ID = "AweDevYouTubeDownloader"
+APP_ID = "AweDevMediaDownloader"
 SUPPORT_URL = "https://ko-fi.com/awedev"
 SUPPORT_LABEL = "☕ Buy a Cappuccino"
-PROJECT_URL = "https://github.com/AweGuider/YouTube-Downloader"
+PROJECT_URL = "https://github.com/AweGuider/AweDev-Media-Downloader"
 LINKTREE_URL = "https://linktr.ee/awedev"
 TEST_URL = "https://www.youtube.com/watch?v=QDia3e12czc"
 DEFAULT_RESOLUTION = "1080p"

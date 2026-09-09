@@ -1,6 +1,6 @@
 # AweDev Media Downloader
 
-A small Windows-first desktop downloader for saving media from supported social platforms. It wraps provider adapters in a Tkinter GUI, uses `yt-dlp` for video extraction, bundles runtime helpers for release builds, and shows startup diagnostics so users can see whether downloader dependencies are healthy.
+[AweDev Media Downloader](https://github.com/AweGuider/AweDev-Media-Downloader) is a small Windows-first desktop downloader for saving media from supported social platforms. It wraps provider adapters in a Tkinter GUI, uses `yt-dlp` for video extraction, bundles runtime helpers for release builds, and shows startup diagnostics so users can see whether downloader dependencies are healthy.
 
 ## Features
 
@@ -27,9 +27,9 @@ The first public release target is Windows. The source may run on other platform
 
 ## Install From Release
 
-1. Download the latest release ZIP or EXE from the repository Releases page.
+1. Download the latest release ZIP or EXE from the [repository Releases page](https://github.com/AweGuider/AweDev-Media-Downloader/releases).
 2. Extract the ZIP if needed.
-3. Run `AweDevMediaDownloader_by_AweDev.exe`.
+3. Run `AweDevMediaDownloader.exe`.
 4. If Windows SmartScreen appears, review the publisher/file details and choose whether to run it.
 
 The release EXE is intended to include the needed Python app package, thumbnail preview support, `ffmpeg`, `ffprobe`, and a JavaScript runtime used by `yt-dlp`.
@@ -61,7 +61,7 @@ Or run directly:
 python downloader.py
 ```
 
-New installations save downloads to `Downloads\AweDev-Media-Downloads` by default. Existing saved or custom output paths are preserved.
+Version 2 stores settings under `%APPDATA%\AweDevMediaDownloader` and saves downloads to `Downloads\AweDev-Media-Downloads` by default. Settings saved by the former YouTube Downloader identity are not migrated automatically.
 
 ## Build A Release EXE
 
