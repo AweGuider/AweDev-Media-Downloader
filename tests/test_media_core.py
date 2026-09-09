@@ -1,6 +1,9 @@
 import tempfile
+import threading
 import unittest
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from media_downloader import AdapterRegistry, MediaBundle, MediaType, Provider, UnsupportedUrlError
 from media_downloader.adapters.ytdlp_video import YtDlpVideoAdapter
@@ -11,6 +14,17 @@ from media_downloader.files import sanitize_filename, unique_destination_path
 class OptionsFactory:
     def __call__(self, overrides=None):
         return dict(overrides or {})
+
+
+class FakeInstagramLoader:
+    def __init__(self):
+        self.context = object()
+        self.downloaded_urls = []
+
+    def download_pic(self, filename, url, _mtime):
+        self.downloaded_urls.append(url)
+        suffix = ".mp4" if url.endswith(".mp4") else ".jpg"
+        Path(f"{filename}{suffix}").write_bytes(b"test media")
 
 
 class MediaCoreTests(unittest.TestCase):
@@ -33,15 +47,67 @@ class MediaCoreTests(unittest.TestCase):
         registry = AdapterRegistry([self.youtube, instagram])
         self.assertIs(registry.resolve("https://music.youtube.com/watch?v=abc"), self.youtube)
         self.assertIs(registry.resolve("https://www.instagram.com/reel/example/"), instagram)
+        self.assertIs(registry.resolve("https://www.instagram.com/p/example/"), instagram)
         with self.assertRaises(UnsupportedUrlError):
-            registry.resolve("https://www.instagram.com/p/example/")
+            registry.resolve("https://www.instagram.com/stories/example/123/")
 
-    def test_instagram_adapter_only_claims_reels(self):
+    def test_instagram_adapter_claims_reels_and_posts(self):
         instagram = InstagramAdapter(OptionsFactory())
         self.assertTrue(instagram.supports("https://www.instagram.com/reel/ABC123/"))
         self.assertTrue(instagram.supports("https://instagram.com/user/reels/ABC123/?share=1"))
-        self.assertFalse(instagram.supports("https://www.instagram.com/p/ABC123/"))
+        self.assertTrue(instagram.supports("https://www.instagram.com/p/ABC123/"))
+        self.assertFalse(instagram.supports("https://www.instagram.com/reels/audio/123/"))
         self.assertFalse(instagram.supports("https://example.com/reel/ABC123/"))
+
+    def test_instagram_carousel_inspection_and_download(self):
+        fake_loader = FakeInstagramLoader()
+        fake_post = SimpleNamespace(
+            typename="GraphSidecar",
+            owner_username="creator",
+            date_utc=datetime(2026, 9, 8),
+            get_sidecar_nodes=lambda: (
+                SimpleNamespace(
+                    is_video=False,
+                    display_url="https://cdn.example/first.jpg",
+                    video_url=None,
+                ),
+                SimpleNamespace(
+                    is_video=True,
+                    display_url="https://cdn.example/second.jpg",
+                    video_url="https://cdn.example/second.mp4",
+                ),
+            ),
+        )
+        instagram = InstagramAdapter(
+            OptionsFactory(),
+            loader_factory=lambda: fake_loader,
+            post_factory=lambda _context, _shortcode: fake_post,
+        )
+
+        bundle = instagram.inspect("https://www.instagram.com/p/ABC123/")
+
+        self.assertEqual(bundle.media_type, MediaType.MIXED)
+        self.assertEqual(len(bundle.items), 2)
+        self.assertEqual(bundle.creator, "creator")
+        self.assertEqual(bundle.upload_date, "20260908")
+        with tempfile.TemporaryDirectory() as temp_directory:
+            result = instagram.download(
+                bundle,
+                options=SimpleNamespace(
+                    output_directory=Path(temp_directory),
+                    audio_only=False,
+                    preserve_upload_date=False,
+                    cleanup_enabled=True,
+                ),
+                cancel_event=threading.Event(),
+            )
+            self.assertEqual([path.suffix for path in result.files], [".jpg", ".mp4"])
+            self.assertTrue(all(path.exists() for path in result.files))
+
+        self.assertEqual(
+            fake_loader.downloaded_urls,
+            ["https://cdn.example/first.jpg", "https://cdn.example/second.mp4"],
+        )
 
     def test_duplicate_provider_registration_is_rejected(self):
         registry = AdapterRegistry([self.youtube])

@@ -1,14 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title YouTube Downloader Build Script
+title AweDev Media Downloader Build Script
 
 set "SOURCE=downloader.py"
 set "ICON_PATH=assets\app.ico"
 
 :: === Prompt for App Name ===
-set /p "FILE_NAME=Enter executable name (default: YouTubeDownloader): "
-if "%FILE_NAME%"=="" set "FILE_NAME=YouTubeDownloader_by_AweDev"
+set /p "FILE_NAME=Enter executable name (default: AweDevMediaDownloader): "
+if "%FILE_NAME%"=="" set "FILE_NAME=AweDevMediaDownloader_by_AweDev"
 
 :: === Prompt for ZIP Name ===
 set /p "ZIP_NAME=Enter ZIP archive name (default: %FILE_NAME%-Build.zip): "
@@ -46,7 +46,7 @@ if not exist "%ICON_PATH%" (
 )
 
 echo Checking Python build prerequisites...
-python -c "import tkinter as tk; tk.Tcl(); import yt_dlp; import yt_dlp_ejs; import PIL; import PyInstaller" >> "%LOG_FILE%" 2>&1
+python -c "import tkinter as tk; tk.Tcl(); import instaloader; import yt_dlp; import yt_dlp_ejs; import PIL; import PyInstaller" >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
     echo Python build prerequisite check failed. Check !LOG_FILE! for details.
     echo Repair Python Tcl/Tk support or use a Python install with working Tkinter, then rerun this script.
@@ -136,6 +136,7 @@ python -m PyInstaller ^
     --collect-submodules yt_dlp_ejs ^
     --copy-metadata yt-dlp ^
     --copy-metadata yt-dlp-ejs ^
+    --copy-metadata instaloader ^
     "%SOURCE%" >> "%LOG_FILE%" 2>&1
 
 if errorlevel 1 (

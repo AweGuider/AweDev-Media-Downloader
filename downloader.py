@@ -425,6 +425,12 @@ def run_startup_diagnostics():
     else:
         results.append(diagnostic("fail", "yt-dlp-ejs", "missing"))
 
+    instaloader_version = package_version("instaloader")
+    if instaloader_version:
+        results.append(diagnostic("pass", "Instaloader", instaloader_version))
+    else:
+        results.append(diagnostic("fail", "Instaloader", "missing; Instagram posts are unavailable"))
+
     results.append(check_binary_version("ffmpeg"))
     results.append(check_binary_version("ffprobe"))
     results.append(check_js_runtime())
@@ -528,15 +534,24 @@ def set_download_button_enabled(enabled):
             download_button.config(state=tk.DISABLED, bg="#8aa99a", cursor="")
 
 def set_quality_state(enabled):
-    if "resolution_dropdown" not in globals() or "audio_format_dropdown" not in globals():
+    if (
+        "resolution_dropdown" not in globals()
+        or "audio_format_dropdown" not in globals()
+        or "audio_checkbox" not in globals()
+    ):
         return
 
+    capabilities = latest_media_info.get("capabilities") if enabled and latest_media_info else None
+    audio_supported = bool(capabilities and capabilities.audio_extraction)
+    quality_supported = bool(capabilities and capabilities.quality_selection)
+    audio_checkbox.config(state=tk.NORMAL if not enabled or audio_supported else tk.DISABLED)
+
     if audio_only.get():
-        audio_format_dropdown.config(state="readonly")
+        audio_format_dropdown.config(state="readonly" if enabled and audio_supported else "disabled")
         resolution_dropdown.config(state="disabled")
     else:
         audio_format_dropdown.config(state="disabled")
-        resolution_dropdown.config(state="readonly" if enabled else "disabled")
+        resolution_dropdown.config(state="readonly" if enabled and quality_supported else "disabled")
 
 def set_link_ready(is_ready, status_text=None):
     global url_ready_for_download
@@ -736,26 +751,33 @@ def build_media_info(bundle):
         for item in bundle.items
         for resolution in item.resolutions
     }
+    item_count = len(bundle.items)
+    if bundle.media_type.value == "image":
+        media_summary = f"Contents: {item_count} image{'s' if item_count != 1 else ''}"
+    elif bundle.media_type.value == "mixed":
+        media_summary = f"Contents: {item_count} media items"
+    else:
+        media_summary = format_duration(bundle.duration)
 
     return {
         "url": bundle.source_url,
         "title": title,
         "channel": clean_metadata_value(bundle.creator),
         "duration": bundle.duration,
-        "duration_text": format_duration(bundle.duration),
+        "duration_text": media_summary,
         "thumbnail_url": thumbnail_url,
         "thumbnail_bytes": download_thumbnail_bytes(thumbnail_url),
         "resolutions": sorted(
             resolutions,
             key=lambda value: int(value.replace("p", "")),
             reverse=True,
-        ) or ["Highest Available"],
+        ) or (["Highest Available"] if bundle.capabilities.quality_selection else ["Original"]),
         "upload_date": upload_date,
         "upload_date_text": format_upload_date(upload_date),
         "status_text": format_live_status({"live_status": bundle.live_status}),
         "provider": bundle.provider.value,
         "media_type": bundle.media_type.value,
-        "item_count": len(bundle.items),
+        "item_count": item_count,
         "capabilities": bundle.capabilities,
         "bundle": bundle,
     }
@@ -1009,21 +1031,31 @@ def apply_media_info_results(request_id, url, media_info, error_message=None):
         latest_media_info = None
         if not audio_only.get():
             resolution_menu.set("Unavailable")
-        set_link_ready(False, "Link check failed\nNo video metadata returned.")
+        set_link_ready(False, "Link check failed\nNo media metadata returned.")
         show_preview_error()
         return
 
     latest_media_info = media_info
+    capabilities = media_info.get("capabilities")
+    if capabilities and not capabilities.audio_extraction and audio_only.get():
+        audio_only.set(False)
+        toggle_audio_mode()
+
     resolutions = media_info.get("resolutions") if media_info else None
     if not resolutions:
         resolutions = ["Highest Available"]
 
     resolution_dropdown.config(values=resolutions)
 
-    preferred_resolution = selected_resolution if selected_resolution in resolutions else resolutions[0]
-    set_resolution(preferred_resolution)
+    if capabilities and not capabilities.quality_selection:
+        resolution_menu.set(resolutions[0])
+    else:
+        preferred_resolution = selected_resolution if selected_resolution in resolutions else resolutions[0]
+        set_resolution(preferred_resolution)
     apply_media_preview(media_info)
-    set_link_ready(True, "Ready to download.")
+    item_count = media_info.get("item_count") or 1
+    ready_text = f"Ready to download {item_count} items." if item_count > 1 else "Ready to download."
+    set_link_ready(True, ready_text)
 
 def fetch_media_info(url):
     """Fetches normalized preview metadata for a supported URL."""
