@@ -8,7 +8,7 @@ set "ICON_PATH=assets\app.ico"
 
 :: === Prompt for App Name ===
 set /p "FILE_NAME=Enter executable name (default: AweDevMediaDownloader): "
-if "%FILE_NAME%"=="" set "FILE_NAME=AweDevMediaDownloader_by_AweDev"
+if "%FILE_NAME%"=="" set "FILE_NAME=AweDevMediaDownloader"
 
 :: === Prompt for ZIP Name ===
 set /p "ZIP_NAME=Enter ZIP archive name (default: %FILE_NAME%-Build.zip): "
