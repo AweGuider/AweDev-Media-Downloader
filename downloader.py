@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
+import webbrowser
 from datetime import datetime
 from io import BytesIO
 
@@ -27,6 +28,8 @@ from PIL import Image, ImageOps, ImageTk
 
 APP_NAME = "YouTube Downloader"
 APP_ID = "AweDevYouTubeDownloader"
+SUPPORT_URL = "https://ko-fi.com/awedev"
+SUPPORT_LABEL = "☕ Buy a Cappuccino"
 TEST_URL = "https://www.youtube.com/watch?v=QDia3e12czc"
 DEFAULT_RESOLUTION = "1080p"
 DEFAULT_AUDIO_FORMAT = "MP3"
@@ -606,6 +609,33 @@ def video_format_for_resolution(resolution):
 
     height = int(match.group(1))
     return f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best[height<={height}]/best"
+
+def copy_support_url_to_clipboard():
+    root.clipboard_clear()
+    root.clipboard_append(SUPPORT_URL)
+    root.update_idletasks()
+
+def open_support_page():
+    """Opens the AweDev Ko-fi page, with a clipboard fallback."""
+    try:
+        if webbrowser.open(SUPPORT_URL, new=2):
+            return
+        raise RuntimeError("No browser accepted the support URL.")
+    except Exception as e:
+        print(f"Could not open support page: {e}")
+
+    try:
+        copy_support_url_to_clipboard()
+        messagebox.showinfo(
+            "Support AweDev",
+            f"Could not open the support page automatically.\n\nThe Ko-fi link was copied to your clipboard:\n{SUPPORT_URL}",
+        )
+    except Exception as e:
+        print(f"Could not copy support URL: {e}")
+        messagebox.showerror(
+            "Support AweDev",
+            f"Could not open the support page automatically.\n\nVisit:\n{SUPPORT_URL}",
+        )
 
 def open_download_folder():
     """ Opens the download folder in File Explorer. """
@@ -1617,11 +1647,43 @@ download_button = tk.Button(
 )
 download_button.grid(row=0, column=0)
 
+support_frame = ttk.Frame(main_frame)
+support_frame.grid(row=5, column=0, sticky="ew", pady=(8, 0))
+support_frame.columnconfigure(0, weight=1)
+
+support_inner_frame = ttk.Frame(support_frame)
+support_inner_frame.grid(row=0, column=0)
+
+support_text_label = ttk.Label(
+    support_inner_frame,
+    text="Enjoying the app? Support future fixes and Windows builds.",
+    foreground="#666666",
+    font=("Segoe UI", 8),
+)
+
+support_button = tk.Button(
+    support_inner_frame,
+    text=SUPPORT_LABEL,
+    command=open_support_page,
+    bg="#a8753d",
+    fg="white",
+    activebackground="#8f6333",
+    activeforeground="white",
+    font=("Segoe UI", 9),
+    padx=10,
+    pady=2,
+    relief=tk.RAISED,
+    cursor="hand2",
+)
+support_button.grid(row=0, column=0)
+support_text_label.grid(row=1, column=0, pady=(4, 0))
+ToolTip(support_button, "Support future releases, dependency updates, and Windows testing.")
+
 status_frame = ttk.LabelFrame(main_frame, text="Status", padding=10)
-status_frame.grid(row=5, column=0, sticky="nsew", pady=(12, 0))
+status_frame.grid(row=6, column=0, sticky="nsew", pady=(12, 0))
 status_frame.columnconfigure(0, weight=1)
 status_frame.rowconfigure(2, weight=1)
-main_frame.rowconfigure(5, weight=1)
+main_frame.rowconfigure(6, weight=1)
 
 status_label = ttk.Label(status_frame, text="", wraplength=680, justify=tk.LEFT)
 status_label.grid(row=0, column=0, sticky="ew")

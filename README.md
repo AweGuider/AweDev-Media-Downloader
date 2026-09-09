@@ -12,6 +12,12 @@ A small Windows-first desktop downloader for saving individual YouTube videos or
 - Show dependency diagnostics for `yt-dlp`, `yt-dlp-ejs`, JavaScript runtime support, `ffmpeg`, `ffprobe`, network access, and old PyInstaller temp folders.
 - Save user settings such as output folder, cleanup behavior, timestamp behavior, mode, and format.
 
+## Support AweDev
+
+If this tool saved you time, you can buy a cappuccino to support the road to future releases, dependency updates, and Windows build testing. Support is optional; the app stays free.
+
+[☕ Buy a Cappuccino on Ko-fi](https://ko-fi.com/awedev)
+
 ## Supported Platform
 
 The first public release target is Windows. The source may run on other platforms with Python and compatible dependencies, but non-Windows use is not the release target yet.
