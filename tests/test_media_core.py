@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from media_downloader import AdapterRegistry, MediaBundle, MediaType, Provider, UnsupportedUrlError
+from media_downloader.adapters.facebook import FacebookAdapter
 from media_downloader.adapters.ytdlp_video import YtDlpVideoAdapter
 from media_downloader.adapters.instagram import InstagramAdapter
 from media_downloader.files import sanitize_filename, unique_destination_path
@@ -113,6 +114,28 @@ class MediaCoreTests(unittest.TestCase):
         registry = AdapterRegistry([self.youtube])
         with self.assertRaises(ValueError):
             registry.register(self.youtube)
+
+    def test_facebook_adapter_claims_only_known_video_urls(self):
+        facebook = FacebookAdapter(OptionsFactory())
+        supported_urls = (
+            "https://www.facebook.com/reel/123456789/",
+            "https://www.facebook.com/watch/?v=123456789",
+            "https://www.facebook.com/creator/videos/123456789/",
+            "https://www.facebook.com/share/v/abc123/",
+            "https://fb.watch/abc123/",
+        )
+        for url in supported_urls:
+            with self.subTest(url=url):
+                self.assertTrue(facebook.supports(url))
+
+        unsupported_urls = (
+            "https://www.facebook.com/creator/posts/123456789/",
+            "https://www.facebook.com/photo/?fbid=123456789",
+            "https://example.com/reel/123456789/",
+        )
+        for url in unsupported_urls:
+            with self.subTest(url=url):
+                self.assertFalse(facebook.supports(url))
 
     def test_media_bundle_type_defaults_to_video(self):
         bundle = MediaBundle(provider=Provider.YOUTUBE, source_url="https://youtu.be/a", title="A")

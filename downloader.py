@@ -29,7 +29,7 @@ from media_downloader import (
     MediaDownloadService,
     Provider,
 )
-from media_downloader.adapters import InstagramAdapter, YtDlpVideoAdapter
+from media_downloader.adapters import FacebookAdapter, InstagramAdapter, YtDlpVideoAdapter
 
 ### Command to create .exe out of .py
 # python -m PyInstaller --onefile downloader.py
@@ -250,6 +250,7 @@ adapter_registry = AdapterRegistry([
         display_name="YouTube",
     ),
     InstagramAdapter(create_ytdlp_options),
+    FacebookAdapter(create_ytdlp_options),
 ])
 media_service = MediaDownloadService(adapter_registry)
 

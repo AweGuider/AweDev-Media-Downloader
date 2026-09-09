@@ -4,7 +4,7 @@ A small Windows-first desktop downloader for saving media from supported social 
 
 ## Features
 
-- Download one public YouTube video or Instagram Reel URL at a time as MP4.
+- Download one public YouTube, Instagram Reel, or Facebook video URL at a time as MP4.
 - Download every image and video from a public Instagram post or carousel.
 - Download audio-only files as MP3, WAV, AAC, or FLAC.
 - Preview the checked media's thumbnail, title, creator, contents, and upload date before downloading.
@@ -98,6 +98,7 @@ The build script asks for an EXE name, ZIP name, overwrite behavior, and whether
 - No DRM or copyright bypassing.
 - Supported sites and `yt-dlp` behavior can change, so some failures may require dependency updates or a new app release.
 - Instagram authentication and private media are not supported. Public availability can still vary because Instagram rate-limits automated requests.
+- Facebook posts, photos, private videos, and login-gated videos are not supported.
 
 ## Legal Note
 
