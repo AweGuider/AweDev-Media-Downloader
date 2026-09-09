@@ -1,7 +1,5 @@
 import os
 import time
-import platform
-import ctypes
 import sys
 import yt_dlp
 import tempfile
@@ -20,8 +18,18 @@ import urllib.request
 import webbrowser
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 
 from PIL import Image, ImageOps, ImageTk
+
+from media_downloader import (
+    AdapterRegistry,
+    DownloadCancelled,
+    DownloadOptions,
+    MediaDownloadService,
+    Provider,
+)
+from media_downloader.adapters import YtDlpVideoAdapter
 
 ### Command to create .exe out of .py
 # python -m PyInstaller --onefile downloader.py
@@ -233,6 +241,16 @@ def create_ytdlp_options(overrides=None):
     return options
 
 prepend_runtime_tools_to_path()
+
+adapter_registry = AdapterRegistry([
+    YtDlpVideoAdapter(
+        provider=Provider.YOUTUBE,
+        supported_hosts=("youtube.com", "youtu.be", "youtube-nocookie.com"),
+        options_factory=create_ytdlp_options,
+        display_name="YouTube",
+    ),
+])
+media_service = MediaDownloadService(adapter_registry)
 
 def diagnostic(status, label, detail):
     return {"status": status, "label": label, "detail": detail}
@@ -473,9 +491,6 @@ def run_startup_diagnostics_async():
 
     threading.Thread(target=worker, daemon=True).start()
 
-class DownloadCancelled(Exception):
-    pass
-
 def queue_ui(action, *args):
     ui_queue.put((action, args))
 
@@ -530,85 +545,6 @@ def set_link_ready(is_ready, status_text=None):
 
     if status_text is not None:
         status_label.config(text=status_text)
-
-def output_template_path(temp_dir, media_title):
-    safe_title = media_title.replace("%", "%%")
-    return os.path.join(temp_dir, f"{safe_title}.%(ext)s")
-
-def unique_destination_path(directory, filename):
-    base_name, extension = os.path.splitext(filename)
-    candidate = os.path.join(directory, filename)
-    counter = 1
-
-    while os.path.exists(candidate):
-        candidate = os.path.join(directory, f"{base_name} ({counter}){extension}")
-        counter += 1
-
-    return candidate
-
-def find_downloaded_file(temp_dir, media_title, preferred_extension, alternate_extensions=()):
-    extensions = [preferred_extension.lower()]
-    extensions.extend(extension.lower() for extension in alternate_extensions)
-
-    for extension in extensions:
-        expected_path = os.path.join(temp_dir, f"{media_title}.{extension}")
-        if os.path.exists(expected_path):
-            return expected_path
-
-    candidates = []
-    for entry in os.listdir(temp_dir):
-        path = os.path.join(temp_dir, entry)
-        if not os.path.isfile(path):
-            continue
-
-        extension = os.path.splitext(entry)[1].lstrip(".").lower()
-        if extension in extensions:
-            candidates.append(path)
-
-    if candidates:
-        return max(candidates, key=os.path.getmtime)
-
-    files = [os.path.join(temp_dir, entry) for entry in os.listdir(temp_dir)]
-    files = [path for path in files if os.path.isfile(path)]
-    if len(files) == 1:
-        return files[0]
-
-    raise FileNotFoundError(f"Could not find downloaded .{preferred_extension} file")
-
-def ensure_extension(filepath, extension):
-    if filepath.lower().endswith(f".{extension.lower()}"):
-        return filepath
-
-    directory = os.path.dirname(filepath)
-    base_name = os.path.splitext(os.path.basename(filepath))[0]
-    renamed_path = unique_destination_path(directory, f"{base_name}.{extension}")
-    os.rename(filepath, renamed_path)
-    return renamed_path
-
-def cleanup_temp_dir(temp_dir, cleanup_enabled):
-    if cleanup_enabled and temp_dir and os.path.isdir(temp_dir):
-        print("Cleaning up temporary files...")
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-def upload_date_to_timestamp(upload_date):
-    if not upload_date:
-        return None
-
-    try:
-        return datetime.strptime(upload_date, "%Y%m%d").timestamp()
-    except ValueError:
-        return None
-
-def video_format_for_resolution(resolution):
-    if resolution == "Highest Available":
-        return "bestvideo*+bestaudio/best"
-
-    match = re.search(r"(\d+)", resolution or "")
-    if not match:
-        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=1080]/best"
-
-    height = int(match.group(1))
-    return f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best[height<={height}]/best"
 
 def copy_support_url_to_clipboard():
     root.clipboard_clear()
@@ -763,29 +699,6 @@ def format_preview_details(media_info):
 
     return " | ".join(details)
 
-def thumbnail_sort_key(thumbnail):
-    try:
-        width = int(thumbnail.get("width") or 0)
-        height = int(thumbnail.get("height") or 0)
-    except (TypeError, ValueError):
-        width = 0
-        height = 0
-    preference = 1 if width >= PREVIEW_IMAGE_SIZE[0] and height >= PREVIEW_IMAGE_SIZE[1] else 0
-    return preference, width * height, width, height
-
-def best_thumbnail_url(info_dict):
-    thumbnails = info_dict.get("thumbnails")
-    if isinstance(thumbnails, list):
-        valid_thumbnails = [
-            thumbnail
-            for thumbnail in thumbnails
-            if isinstance(thumbnail, dict) and thumbnail.get("url")
-        ]
-        if valid_thumbnails:
-            return max(valid_thumbnails, key=thumbnail_sort_key)["url"]
-
-    return info_dict.get("thumbnail")
-
 def download_thumbnail_bytes(thumbnail_url):
     if not thumbnail_url:
         return None
@@ -803,36 +716,37 @@ def download_thumbnail_bytes(thumbnail_url):
 
     return thumbnail_bytes
 
-def extract_available_resolutions(info_dict):
-    available_resolutions = set()
-
-    for video_format in info_dict.get("formats") or []:
-        try:
-            height = int(video_format.get("height") or 0)
-        except (TypeError, ValueError):
-            height = 0
-        if height > 0:
-            available_resolutions.add(f"{height}p")
-
-    return sorted(available_resolutions, key=lambda value: int(value.replace("p", "")), reverse=True)
-
-def build_media_info(url, info_dict):
-    title = clean_text(info_dict.get("title") or "Untitled video")
-    thumbnail_url = best_thumbnail_url(info_dict)
-    upload_date = info_dict.get("upload_date")
+def build_media_info(bundle):
+    title = clean_text(bundle.title or "Untitled media")
+    thumbnail_url = bundle.thumbnail_url
+    upload_date = bundle.upload_date
+    resolutions = {
+        resolution
+        for item in bundle.items
+        for resolution in item.resolutions
+    }
 
     return {
-        "url": url,
+        "url": bundle.source_url,
         "title": title,
-        "channel": clean_metadata_value(info_dict.get("channel") or info_dict.get("uploader")),
-        "duration": info_dict.get("duration"),
-        "duration_text": format_duration(info_dict.get("duration")),
+        "channel": clean_metadata_value(bundle.creator),
+        "duration": bundle.duration,
+        "duration_text": format_duration(bundle.duration),
         "thumbnail_url": thumbnail_url,
         "thumbnail_bytes": download_thumbnail_bytes(thumbnail_url),
-        "resolutions": extract_available_resolutions(info_dict) or ["Highest Available"],
+        "resolutions": sorted(
+            resolutions,
+            key=lambda value: int(value.replace("p", "")),
+            reverse=True,
+        ) or ["Highest Available"],
         "upload_date": upload_date,
         "upload_date_text": format_upload_date(upload_date),
-        "status_text": format_live_status(info_dict),
+        "status_text": format_live_status({"live_status": bundle.live_status}),
+        "provider": bundle.provider.value,
+        "media_type": bundle.media_type.value,
+        "item_count": len(bundle.items),
+        "capabilities": bundle.capabilities,
+        "bundle": bundle,
     }
 
 def create_preview_photo(image_bytes):
@@ -979,7 +893,7 @@ def download_video_gui():
     url = url_entry.get().strip()
 
     if not url:
-        messagebox.showerror("Error", "Please enter a YouTube URL")
+        messagebox.showerror("Error", "Please enter a media URL")
         return
 
     if not url_ready_for_download:
@@ -1001,6 +915,7 @@ def download_video_gui():
         "preserve_upload_date": preserve_upload_date.get(),
         "media_title": media_info.get("title") if media_info else None,
         "upload_date": media_info.get("upload_date") if media_info else None,
+        "bundle": media_info.get("bundle") if media_info else None,
     }
     download_cancel_event = threading.Event()
 
@@ -1100,11 +1015,10 @@ def apply_media_info_results(request_id, url, media_info, error_message=None):
     set_link_ready(True, "Ready to download.")
 
 def fetch_media_info(url):
-    """Fetches preview metadata and available video resolutions for a URL."""
+    """Fetches normalized preview metadata for a supported URL."""
     try:
-        with yt_dlp.YoutubeDL(create_ytdlp_options()) as ydl:
-            info_dict = ydl.extract_info(url, download=False)
-            return build_media_info(url, info_dict), None
+        bundle = media_service.inspect(url)
+        return build_media_info(bundle), None
     except Exception as e:
         error_message = clean_text(str(e)) or e.__class__.__name__
         print(f"❌ Error fetching media info: {error_message}")
@@ -1115,7 +1029,7 @@ def download_video_thread(download_settings, cancel_event):
     success, error_message, final_path = download_video(download_settings, cancel_event)
     queue_ui("download_done", success, error_message, final_path)
 
-def update_ui_after_download(success, error_message=None, final_path=None):
+def update_ui_after_download(success, error_message=None, final_paths=None):
     """ Updates the UI after the download is completed. """
     global download_thread, download_cancel_event
 
@@ -1128,7 +1042,12 @@ def update_ui_after_download(success, error_message=None, final_path=None):
 
     if success:
         status_label.config(text="Download complete")
-        messagebox.showinfo("Download Complete", f"File saved to:\n{final_path}")
+        saved_paths = list(final_paths or [])
+        if len(saved_paths) == 1:
+            completion_message = f"File saved to:\n{saved_paths[0]}"
+        else:
+            completion_message = f"{len(saved_paths)} files saved to:\n{output_directory}"
+        messagebox.showinfo("Download Complete", completion_message)
         open_download_folder()
     else:
         details = error_message or "Unknown error"
@@ -1139,120 +1058,28 @@ def update_ui_after_download(success, error_message=None, final_path=None):
     set_download_button_enabled(url_ready_for_download)
 
 def download_video(download_settings, cancel_event):
-    """ Downloads a YouTube video or extracts audio based on user selection. """
+    """Downloads inspected media through its registered provider adapter."""
     url = download_settings["url"]
     output_dir = download_settings["output_dir"]
-    resolution = download_settings["resolution"]
-    is_audio_only = download_settings["is_audio_only"]
-    audio_format = download_settings["audio_format"]
-    cleanup_enabled = download_settings["cleanup_enabled"]
-    preserve_upload_date_setting = download_settings["preserve_upload_date"]
-    media_title = sanitize_filename(download_settings.get("media_title") or "")
-    upload_date = download_settings.get("upload_date")
-
-    print(f"🎥 Fetching media... Audio Only: {is_audio_only}")
-
-    # Use a temporary directory for processing
-    temp_dir = tempfile.mkdtemp()
 
     # If the user has not changed the output folder, use the default folder
     if output_dir == os.getcwd():
         output_dir = default_output_folder
 
-    # Ensure the output folder exists
-    os.makedirs(output_dir, exist_ok=True)
-
     try:
         if cancel_event.is_set():
             raise DownloadCancelled("Download cancelled")
-
-        if not media_title or (preserve_upload_date_setting and not upload_date):
-            with yt_dlp.YoutubeDL(create_ytdlp_options()) as ydl:
-                info_dict = ydl.extract_info(url, download=False)
-                if not media_title:
-                    media_title = sanitize_filename(info_dict.get("title", "output"))
-                if not upload_date:
-                    upload_date = info_dict.get("upload_date")
-
-        if not media_title:
-            media_title = "output"
-
-        progress = make_progress_hook(cancel_event)
-        output_template = output_template_path(temp_dir, media_title)
-
-        if is_audio_only:
-            ydl_opts = create_ytdlp_options({
-                'format': 'bestaudio/best',  # Download best audio only
-                'outtmpl': output_template,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': audio_format,
-                    'preferredquality': '192',
-                }],
-                'fragment_retries': 10,
-                'concurrent_fragments': 5,
-                'progress_hooks': [progress],
-            })
-
-        else:
-            print("🛠️ VIDEO MODE DETECTED")
-            selected_format = video_format_for_resolution(resolution)
-            print(f"Resolution Selected: {resolution}, Format Selected: {selected_format}")
-
-            ydl_opts = create_ytdlp_options({
-                'format': selected_format,
-                'merge_output_format': 'mp4',
-                'outtmpl': output_template,
-                'postprocessor_args': [
-                    '-c:a', 'aac',  # Convert audio to AAC (Windows-compatible)
-                    '-b:a', '192k',  # Set audio bitrate to 192kbps for good quality
-                    '-c:v', 'copy'  # Keep video unchanged (no re-encoding)
-                ],
-                'fragment_retries': 10,
-                'concurrent_fragments': 5,
-                'progress_hooks': [progress],
-            })
-
-        print("⏬ Starting yt-dlp download...")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        print("✅ yt-dlp download finished")
-        print(f"📂 Temp directory contents: {os.listdir(temp_dir)}")
-
-        if is_audio_only:
-            alternate_extensions = ("m4a",) if audio_format == "aac" else ()
-            final_file = find_downloaded_file(temp_dir, media_title, audio_format, alternate_extensions)
-            final_file = ensure_extension(final_file, audio_format)
-        else:
-            final_file = find_downloaded_file(temp_dir, media_title, "mp4")
-            final_file = ensure_extension(final_file, "mp4")
-
-        # Check file codecs after download
-        probe_cmd = [
-            runtime_binary_path("ffprobe") or "ffprobe", "-v", "error", "-show_entries",
-            "stream=codec_type,codec_name", "-of", "default=noprint_wrappers=1",
-            final_file
-        ]
-        print("🔍 Running ffprobe to inspect output file:")
-        try:
-            result = subprocess.run(
-                probe_cmd,
-                capture_output=True,
-                text=True,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            print(result.stdout)
-        except Exception as e:
-            print(f"⚠️ ffprobe failed: {e}")
-
-        final_path = unique_destination_path(output_dir, os.path.basename(final_file))
-        shutil.move(final_file, final_path)
-
-        print(f"✅ Download complete: {final_path}")
-
-        finalize_download(final_path, upload_date, preserve_upload_date_setting)
-
-        return True, None, final_path
+        bundle = download_settings.get("bundle") or media_service.inspect(url)
+        options = DownloadOptions(
+            output_directory=Path(output_dir),
+            resolution=download_settings["resolution"],
+            audio_only=download_settings["is_audio_only"],
+            audio_format=download_settings["audio_format"],
+            cleanup_enabled=download_settings["cleanup_enabled"],
+            preserve_upload_date=download_settings["preserve_upload_date"],
+        )
+        result = media_service.download(bundle, options, cancel_event, make_progress_hook(cancel_event))
+        return True, None, tuple(str(path) for path in result.files)
 
     except DownloadCancelled as e:
         print(f"Download cancelled: {e}")
@@ -1261,44 +1088,6 @@ def download_video(download_settings, cancel_event):
         error_message = clean_text(str(e)) or e.__class__.__name__
         print(f"❌ Error downloading media: {error_message}")
         return False, error_message, None
-    finally:
-        cleanup_temp_dir(temp_dir, cleanup_enabled)
-
-def preserve_date_created(filepath, created_time):
-    """ Restores the original 'Date Created' timestamp on Windows. """
-    if platform.system() == "Windows":
-        try:
-            # Windows API call to set file creation time
-            ctime = ctypes.windll.kernel32.SetFileTime
-            handle = ctypes.windll.kernel32.CreateFileW(
-                filepath, 256, 0, None, 3, 128, None
-            )
-            if handle != -1:
-                ctime(handle, ctypes.byref(ctypes.c_ulonglong(int(created_time * 10000000 + 116444736000000000))))
-                ctypes.windll.kernel32.CloseHandle(handle)
-                print(f"✅ Restored 'Date Created' on Windows: {time.ctime(created_time)}")
-        except Exception as e:
-            print(f"⚠️ Could not restore 'Date Created': {e}")
-
-def finalize_download(final_path, upload_date, preserve_upload_date_setting):
-    """Applies final filesystem metadata after a successful download."""
-    if not preserve_upload_date_setting:
-        return
-
-    upload_timestamp = upload_date_to_timestamp(upload_date)
-    if not upload_timestamp:
-        return
-
-    try:
-        os.utime(final_path, (upload_timestamp, upload_timestamp))
-        preserve_date_created(final_path, upload_timestamp)
-        print(f"✅ File timestamps updated from upload date: {upload_date}")
-    except Exception as e:
-        print(f"❌ Error updating timestamps: {e}")
-
-def sanitize_filename(filename):
-    """ Removes or replaces invalid characters in filenames """
-    return re.sub(r'[<>:"/\\|?*]', '_', filename)  # Replaces invalid characters with "_"
 
 # Function to clear the URL entry box
 def clear_url():
