@@ -4,11 +4,13 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from media_downloader import AdapterRegistry, MediaBundle, MediaType, Provider, UnsupportedUrlError
 from media_downloader.adapters.facebook import FacebookAdapter
 from media_downloader.adapters.ytdlp_video import YtDlpVideoAdapter
 from media_downloader.adapters.instagram import InstagramAdapter
+from media_downloader.adapters.tiktok import TikTokAdapter
 from media_downloader.files import sanitize_filename, unique_destination_path
 
 
@@ -136,6 +138,63 @@ class MediaCoreTests(unittest.TestCase):
         for url in unsupported_urls:
             with self.subTest(url=url):
                 self.assertFalse(facebook.supports(url))
+
+    def test_tiktok_adapter_claims_only_video_urls(self):
+        tiktok = TikTokAdapter(OptionsFactory())
+        supported_urls = (
+            "https://www.tiktok.com/@creator/video/123456789",
+            "https://vm.tiktok.com/ZMexample/",
+            "https://vt.tiktok.com/ZSexample/",
+            "https://www.tiktok.com/t/ZMexample/",
+            "https://www.tiktok.com/embed/123456789",
+            "https://www.tiktok.com/share/video/123456789",
+            "https://www.tiktokv.com/share/video/123456789/",
+        )
+        for url in supported_urls:
+            with self.subTest(url=url):
+                self.assertTrue(tiktok.supports(url))
+
+        unsupported_urls = (
+            "https://www.tiktok.com/@creator/photo/123456789",
+            "https://www.tiktok.com/@creator",
+            "https://example.com/@creator/video/123456789",
+        )
+        for url in unsupported_urls:
+            with self.subTest(url=url):
+                self.assertFalse(tiktok.supports(url))
+
+    def test_tiktok_adapter_normalizes_ytdlp_metadata(self):
+        class FakeYoutubeDL:
+            def __init__(self, _options):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def extract_info(self, _url, download=False):
+                if download:
+                    raise AssertionError("Metadata inspection unexpectedly downloaded media")
+                return {
+                    "id": "123456789",
+                    "title": "Test TikTok",
+                    "uploader": "creator",
+                    "upload_date": "20260909",
+                    "duration": 12,
+                    "formats": [{"height": 720}],
+                }
+
+        tiktok = TikTokAdapter(OptionsFactory())
+        with patch("media_downloader.adapters.ytdlp_video.yt_dlp.YoutubeDL", FakeYoutubeDL):
+            bundle = tiktok.inspect("https://www.tiktok.com/@creator/video/123456789")
+
+        self.assertEqual(bundle.provider, Provider.TIKTOK)
+        self.assertEqual(bundle.title, "Test TikTok")
+        self.assertEqual(bundle.creator, "creator")
+        self.assertEqual(bundle.items[0].resolutions, ("720p",))
+        self.assertTrue(bundle.capabilities.audio_extraction)
 
     def test_media_bundle_type_defaults_to_video(self):
         bundle = MediaBundle(provider=Provider.YOUTUBE, source_url="https://youtu.be/a", title="A")

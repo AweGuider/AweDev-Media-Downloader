@@ -29,7 +29,12 @@ from media_downloader import (
     MediaDownloadService,
     Provider,
 )
-from media_downloader.adapters import FacebookAdapter, InstagramAdapter, YtDlpVideoAdapter
+from media_downloader.adapters import (
+    FacebookAdapter,
+    InstagramAdapter,
+    TikTokAdapter,
+    YtDlpVideoAdapter,
+)
 
 ### Command to create .exe out of .py
 # python -m PyInstaller --onefile downloader.py
@@ -91,7 +96,7 @@ ui_queue = queue.Queue()
 # For future implementation of stable progress UI update
 latest_progress = {"percent": "0%", "speed": "N/A", "eta": "Unknown"}
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "2.0.0"
 STALE_MEI_AGE_SECONDS = 24 * 60 * 60
 JS_RUNTIME_CANDIDATES = (
     ("deno", "deno", (2, 3, 0), True),
@@ -251,6 +256,7 @@ adapter_registry = AdapterRegistry([
     ),
     InstagramAdapter(create_ytdlp_options),
     FacebookAdapter(create_ytdlp_options),
+    TikTokAdapter(create_ytdlp_options),
 ])
 media_service = MediaDownloadService(adapter_registry)
 
@@ -431,6 +437,12 @@ def run_startup_diagnostics():
         results.append(diagnostic("pass", "Instaloader", instaloader_version))
     else:
         results.append(diagnostic("fail", "Instaloader", "missing; Instagram posts are unavailable"))
+
+    curl_cffi_version = package_version("curl-cffi")
+    if curl_cffi_version:
+        results.append(diagnostic("pass", "curl-cffi", curl_cffi_version))
+    else:
+        results.append(diagnostic("fail", "curl-cffi", "missing; TikTok downloads may be unavailable"))
 
     results.append(check_binary_version("ffmpeg"))
     results.append(check_binary_version("ffprobe"))
@@ -881,7 +893,7 @@ def apply_media_preview(media_info):
     if "preview_image_label" not in globals():
         return
 
-    title_text = media_info.get("title") or "Untitled video"
+    title_text = media_info.get("title") or "Untitled media"
     duration_text = media_info.get("duration_text") or "Length: Unknown"
     details_text = format_preview_details(media_info)
 
@@ -1441,7 +1453,7 @@ timestamp_checkbox = ttk.Checkbutton(
     command=save_settings,
 )
 timestamp_checkbox.grid(row=0, column=1, sticky="w")
-ToolTip(timestamp_checkbox, "When enabled, downloaded files use the video's upload date for file timestamps. Turn it off to keep today's download time.")
+ToolTip(timestamp_checkbox, "When enabled, downloaded files use the media's upload date for file timestamps. Turn it off to keep today's download time.")
 ToolTip(test_link_button, "Insert a tiny test video link.")
 
 destination_frame = ttk.LabelFrame(main_frame, text="Destination", padding=10)

@@ -4,13 +4,13 @@ A small Windows-first desktop downloader for saving media from supported social 
 
 ## Features
 
-- Download one public YouTube, Instagram Reel, or Facebook video URL at a time as MP4.
+- Download one public YouTube, Instagram Reel, Facebook video, or TikTok video URL at a time as MP4.
 - Download every image and video from a public Instagram post or carousel.
 - Download audio-only files as MP3, WAV, AAC, or FLAC.
 - Preview the checked media's thumbnail, title, creator, contents, and upload date before downloading.
 - Choose best available quality or a quality at or below the selected resolution.
 - Save repeated downloads with unique filenames.
-- Show dependency diagnostics for `yt-dlp`, `yt-dlp-ejs`, JavaScript runtime support, `ffmpeg`, `ffprobe`, network access, and old PyInstaller temp folders.
+- Show dependency diagnostics for `yt-dlp`, `yt-dlp-ejs`, Instaloader, `curl-cffi`, JavaScript runtime support, `ffmpeg`, `ffprobe`, network access, and old PyInstaller temp folders.
 - Save user settings such as output folder, cleanup behavior, timestamp behavior, mode, and format.
 
 ## Support AweDev
@@ -99,12 +99,13 @@ The build script asks for an EXE name, ZIP name, overwrite behavior, and whether
 - Supported sites and `yt-dlp` behavior can change, so some failures may require dependency updates or a new app release.
 - Instagram authentication and private media are not supported. Public availability can still vary because Instagram rate-limits automated requests.
 - Facebook posts, photos, private videos, and login-gated videos are not supported.
+- TikTok photo posts, private videos, and login-gated videos are not supported.
 
 ## Legal Note
 
 Use this tool only for content you have the right to download. This project does not bypass DRM and does not grant rights to third-party content. You are responsible for following each source platform's terms and applicable law.
 
-Packaged releases may include third-party tools and packages such as `yt-dlp`, `yt-dlp-ejs`, `Instaloader`, `Pillow`, `ffmpeg`, `ffprobe`, and Node or Deno. Those components are governed by their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before publishing release binaries.
+Packaged releases may include third-party tools and packages such as `yt-dlp`, `yt-dlp-ejs`, `curl-cffi`, `Instaloader`, `Pillow`, `ffmpeg`, `ffprobe`, and Node or Deno. Those components are governed by their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before publishing release binaries.
 
 ## License
 
