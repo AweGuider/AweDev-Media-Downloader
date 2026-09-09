@@ -35,6 +35,15 @@ from media_downloader.adapters import (
     TikTokAdapter,
     YtDlpVideoAdapter,
 )
+from media_downloader.health import (
+    MODE_DEFINITIONS,
+    PROVIDER_LABELS,
+    PROVIDER_SUMMARIES,
+    UNSUPPORTED_MODES,
+    assess_mode_health,
+    provider_health,
+)
+from media_downloader.url_feedback import provider_from_url, user_facing_media_error
 
 ### Command to create .exe out of .py
 # python -m PyInstaller --onefile downloader.py
@@ -43,6 +52,8 @@ APP_NAME = "AweDev Media Downloader"
 APP_ID = "AweDevYouTubeDownloader"
 SUPPORT_URL = "https://ko-fi.com/awedev"
 SUPPORT_LABEL = "☕ Buy a Cappuccino"
+PROJECT_URL = "https://github.com/AweGuider/YouTube-Downloader"
+LINKTREE_URL = "https://linktr.ee/awedev"
 TEST_URL = "https://www.youtube.com/watch?v=QDia3e12czc"
 DEFAULT_RESOLUTION = "1080p"
 DEFAULT_AUDIO_FORMAT = "MP3"
@@ -50,10 +61,16 @@ RESOLUTION_OPTIONS = ("Highest Available", "1080p", "720p", "480p", "360p")
 AUDIO_FORMATS = ("MP3", "WAV", "AAC", "FLAC")
 PREVIEW_IMAGE_SIZE = (200, 112)
 MAX_THUMBNAIL_BYTES = 4 * 1024 * 1024
+HEALTH_COLORS = {
+    "checking": "#6b7280",
+    "pass": "#1f8f4d",
+    "warn": "#b7791f",
+    "fail": "#b00020",
+}
 
 # Default output directory (current folder)
 # Set the default output folder for new installations.
-default_output_folder = os.path.join(os.path.expanduser("~"), "Downloads", "AweDev Media Downloads")
+default_output_folder = os.path.join(os.path.expanduser("~"), "Downloads", "AweDev-Media-Downloads")
 # Ensure the folder exists
 os.makedirs(default_output_folder, exist_ok=True)
 
@@ -92,6 +109,11 @@ download_thread = None
 download_cancel_event = None
 is_closing = False
 ui_queue = queue.Queue()
+startup_diagnostic_results = None
+mode_health_results = ()
+provider_session_issues = {}
+provider_status_widgets = {}
+about_window = None
 
 # For future implementation of stable progress UI update
 latest_progress = {"percent": "0%", "speed": "N/A", "eta": "Unknown"}
@@ -377,11 +399,11 @@ def check_network():
         with urllib.request.urlopen("https://www.youtube.com/generate_204", timeout=5) as response:
             status_code = getattr(response, "status", response.getcode())
     except Exception as e:
-        return diagnostic("warn", "Network", f"YouTube check failed: {e}")
+        return diagnostic("warn", "YouTube network", f"reachability check failed: {e}")
 
     if 200 <= status_code < 400:
-        return diagnostic("pass", "Network", "YouTube reachable")
-    return diagnostic("warn", "Network", f"YouTube returned HTTP {status_code}")
+        return diagnostic("pass", "YouTube network", "reachable")
+    return diagnostic("warn", "YouTube network", f"returned HTTP {status_code}")
 
 def check_pyinstaller_temp_leftovers():
     temp_root = tempfile.gettempdir()
@@ -419,6 +441,13 @@ def run_startup_diagnostics():
         diagnostic("pass", "App", f"{APP_VERSION} ({'EXE' if getattr(sys, 'frozen', False) else 'source'})")
     ]
 
+    registered_providers = set(adapter_registry.providers)
+    for provider in Provider:
+        provider_label = PROVIDER_LABELS[provider]
+        status = "pass" if provider in registered_providers else "fail"
+        detail = "registered" if status == "pass" else "missing"
+        results.append(diagnostic(status, f"{provider_label} adapter", detail))
+
     ytdlp_version = getattr(yt_dlp.version, "__version__", None) or package_version("yt-dlp")
     if ytdlp_version:
         results.append(diagnostic("pass", "yt-dlp", ytdlp_version))
@@ -451,7 +480,7 @@ def run_startup_diagnostics():
     results.append(check_pyinstaller_temp_leftovers())
     return results
 
-def format_diagnostics(results):
+def format_diagnostics(results, media_health=()):
     counts = {"pass": 0, "warn": 0, "fail": 0}
     for result in results:
         counts[result["status"]] += 1
@@ -460,6 +489,14 @@ def format_diagnostics(results):
     labels = {"pass": "OK", "warn": "WARN", "fail": "FAIL"}
     for result in results:
         lines.append(f"[{labels[result['status']]}] {result['label']}: {result['detail']}")
+    if media_health:
+        lines.extend(("", "Media support:"))
+        state_labels = {"pass": "READY", "warn": "LIMITED", "fail": "UNAVAILABLE"}
+        for mode in media_health:
+            provider_label = PROVIDER_LABELS[mode.definition.provider]
+            lines.append(
+                f"[{state_labels[mode.status]}] {provider_label} — {mode.definition.label}: {mode.detail}"
+            )
     return "\n".join(lines)
 
 def diagnostics_color(results):
@@ -487,7 +524,11 @@ def toggle_diagnostics():
         show_diagnostics()
 
 def apply_startup_diagnostics(results):
-    formatted = format_diagnostics(results)
+    global startup_diagnostic_results, mode_health_results
+
+    startup_diagnostic_results = tuple(results)
+    mode_health_results = assess_mode_health(results)
+    formatted = format_diagnostics(results, mode_health_results)
     summary, _, details = formatted.partition("\n")
     color = diagnostics_color(results)
     diagnostics_summary_label.config(text=summary, foreground=color)
@@ -495,6 +536,7 @@ def apply_startup_diagnostics(results):
     diagnostics_text.delete("1.0", tk.END)
     diagnostics_text.insert("1.0", details)
     diagnostics_text.config(state=tk.DISABLED)
+    update_provider_status_widgets()
 
     if any(result["status"] != "pass" for result in results):
         show_diagnostics()
@@ -510,6 +552,172 @@ def run_startup_diagnostics_async():
         queue_ui("diagnostics", results)
 
     threading.Thread(target=worker, daemon=True).start()
+
+def provider_display_status(provider):
+    if not startup_diagnostic_results:
+        return "checking", "Checking..."
+
+    status = provider_health(provider, mode_health_results)
+    if status != "fail" and provider in provider_session_issues:
+        return "warn", "Check failed"
+    return status, {"pass": "Ready", "warn": "Limited", "fail": "Unavailable"}[status]
+
+def provider_detail_text(provider):
+    state_labels = {"pass": "Ready", "warn": "Limited", "fail": "Unavailable"}
+    lines = []
+    matching_health = [mode for mode in mode_health_results if mode.definition.provider == provider]
+    if matching_health:
+        for mode in matching_health:
+            line = f"{mode.definition.label}: {state_labels[mode.status]}"
+            if mode.status != "pass":
+                line += f" — {mode.detail}"
+            lines.append(line)
+    else:
+        lines.extend(
+            f"{mode.label}: Checking..."
+            for mode in MODE_DEFINITIONS
+            if mode.provider == provider
+        )
+
+    lines.extend(
+        f"{label}: {detail}"
+        for mode_provider, label, detail in UNSUPPORTED_MODES
+        if mode_provider == provider
+    )
+    if provider in provider_session_issues:
+        lines.append(f"Last check failed: {provider_session_issues[provider]}")
+    return "\n".join(lines)
+
+def draw_platform_icon(canvas, provider, color):
+    canvas.delete("all")
+    background = canvas.cget("background")
+    if provider == Provider.YOUTUBE:
+        canvas.create_polygon(
+            7, 9, 29, 9, 32, 12, 32, 26, 29, 29, 7, 29, 4, 26, 4, 12,
+            smooth=True,
+            fill=color,
+            outline=color,
+        )
+        canvas.create_polygon(15, 14, 15, 24, 24, 19, fill=background, outline=background)
+    elif provider == Provider.INSTAGRAM:
+        canvas.create_rectangle(6, 6, 30, 30, outline=color, width=3)
+        canvas.create_oval(12, 12, 24, 24, outline=color, width=3)
+        canvas.create_oval(25, 9, 28, 12, fill=color, outline=color)
+    elif provider == Provider.FACEBOOK:
+        canvas.create_text(18, 19, text="f", fill=color, font=("Segoe UI", 27, "bold"))
+    elif provider == Provider.TIKTOK:
+        canvas.create_line(20, 7, 20, 24, fill=color, width=4)
+        canvas.create_line(20, 8, 29, 12, fill=color, width=4)
+        canvas.create_oval(10, 21, 21, 30, fill=color, outline=color)
+
+def update_provider_status_widgets():
+    for provider, widgets in provider_status_widgets.items():
+        status, status_text = provider_display_status(provider)
+        color = HEALTH_COLORS[status]
+        draw_platform_icon(widgets["canvas"], provider, color)
+        widgets["status_label"].config(text=status_text, foreground=color)
+        detail = provider_detail_text(provider)
+        for tooltip in widgets["tooltips"]:
+            tooltip.text = detail
+
+def record_provider_check(url, error_message=None):
+    provider = provider_from_url(url)
+    if not provider:
+        return
+    if error_message:
+        provider_session_issues[provider] = error_message
+    else:
+        provider_session_issues.pop(provider, None)
+    update_provider_status_widgets()
+
+def create_provider_status_widget(parent, provider, column):
+    card = ttk.Frame(parent, cursor="hand2")
+    card.grid(row=0, column=column, sticky="nsew", padx=4)
+    card.columnconfigure(0, weight=1)
+
+    icon_canvas = tk.Canvas(
+        card,
+        width=36,
+        height=36,
+        borderwidth=0,
+        highlightthickness=0,
+        background=root.cget("background"),
+        cursor="hand2",
+    )
+    icon_canvas.grid(row=0, column=0)
+    name_label = ttk.Label(card, text=PROVIDER_LABELS[provider], font=("Segoe UI", 9, "bold"), cursor="hand2")
+    name_label.grid(row=1, column=0)
+    mode_label = ttk.Label(card, text=PROVIDER_SUMMARIES[provider], foreground="#5f6368", font=("Segoe UI", 8), cursor="hand2")
+    mode_label.grid(row=2, column=0)
+    status_label = ttk.Label(card, text="Checking...", foreground=HEALTH_COLORS["checking"], font=("Segoe UI", 8), cursor="hand2")
+    status_label.grid(row=3, column=0, pady=(1, 0))
+
+    clickable_widgets = (card, icon_canvas, name_label, mode_label, status_label)
+    tooltips = []
+    for widget in clickable_widgets:
+        widget.bind("<Button-1>", lambda _event: show_about_dialog())
+        tooltips.append(ToolTip(widget, provider_detail_text(provider)))
+    provider_status_widgets[provider] = {
+        "canvas": icon_canvas,
+        "status_label": status_label,
+        "tooltips": tooltips,
+    }
+    draw_platform_icon(icon_canvas, provider, HEALTH_COLORS["checking"])
+
+def show_about_dialog():
+    global about_window
+
+    if about_window:
+        try:
+            if about_window.winfo_exists():
+                about_window.lift()
+                about_window.focus_force()
+                return
+        except tk.TclError:
+            about_window = None
+
+    about_window = tk.Toplevel(root)
+    about_window.title(f"About {APP_NAME}")
+    about_window.transient(root)
+    about_window.resizable(False, False)
+    set_app_icon(about_window)
+
+    def close_about():
+        global about_window
+        if about_window:
+            about_window.destroy()
+            about_window = None
+
+    content = ttk.Frame(about_window, padding=18)
+    content.grid(sticky="nsew")
+    ttk.Label(content, text=APP_NAME, font=("Segoe UI", 14, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+    ttk.Label(content, text=f"Version {APP_VERSION}", foreground="#5f6368").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 12))
+
+    row = 2
+    for provider in Provider:
+        status, status_text = provider_display_status(provider)
+        color = HEALTH_COLORS[status]
+        ttk.Label(content, text=PROVIDER_LABELS[provider], font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="nw", padx=(0, 12), pady=3)
+        ttk.Label(content, text=status_text, foreground=color).grid(row=row, column=1, sticky="nw", padx=(0, 12), pady=3)
+        ttk.Label(content, text=provider_detail_text(provider), justify=tk.LEFT, wraplength=310).grid(row=row, column=2, sticky="nw", pady=3)
+        row += 1
+
+    ttk.Label(
+        content,
+        text="Readiness reflects local checks. Platform access is confirmed when a URL is checked.",
+        foreground="#5f6368",
+        wraplength=480,
+        justify=tk.LEFT,
+    ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(10, 0))
+    row += 1
+
+    links = ttk.Frame(content)
+    links.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+    ttk.Button(links, text="Project & Issues", command=lambda: open_external_url(PROJECT_URL, "Project & Issues")).grid(row=0, column=0, padx=(0, 6))
+    ttk.Button(links, text="More AweDev Links", command=lambda: open_external_url(LINKTREE_URL, "AweDev Links")).grid(row=0, column=1, padx=(0, 6))
+    ttk.Button(links, text="Close", command=close_about).grid(row=0, column=2)
+
+    about_window.protocol("WM_DELETE_WINDOW", close_about)
 
 def queue_ui(action, *args):
     ui_queue.put((action, args))
@@ -575,32 +783,35 @@ def set_link_ready(is_ready, status_text=None):
     if status_text is not None:
         status_label.config(text=status_text)
 
-def copy_support_url_to_clipboard():
+def copy_url_to_clipboard(url):
     root.clipboard_clear()
-    root.clipboard_append(SUPPORT_URL)
+    root.clipboard_append(url)
     root.update_idletasks()
 
-def open_support_page():
-    """Opens the AweDev Ko-fi page, with a clipboard fallback."""
+def open_external_url(url, title):
     try:
-        if webbrowser.open(SUPPORT_URL, new=2):
+        if webbrowser.open(url, new=2):
             return
         raise RuntimeError("No browser accepted the support URL.")
     except Exception as e:
-        print(f"Could not open support page: {e}")
+        print(f"Could not open {title}: {e}")
 
     try:
-        copy_support_url_to_clipboard()
+        copy_url_to_clipboard(url)
         messagebox.showinfo(
-            "Support AweDev",
-            f"Could not open the support page automatically.\n\nThe Ko-fi link was copied to your clipboard:\n{SUPPORT_URL}",
+            title,
+            f"Could not open the page automatically.\n\nThe link was copied to your clipboard:\n{url}",
         )
     except Exception as e:
-        print(f"Could not copy support URL: {e}")
+        print(f"Could not copy {title} URL: {e}")
         messagebox.showerror(
-            "Support AweDev",
-            f"Could not open the support page automatically.\n\nVisit:\n{SUPPORT_URL}",
+            title,
+            f"Could not open the page automatically.\n\nVisit:\n{url}",
         )
+
+def open_support_page():
+    """Opens the AweDev Ko-fi page, with a clipboard fallback."""
+    open_external_url(SUPPORT_URL, "Support AweDev")
 
 def open_download_folder():
     """ Opens the download folder in File Explorer. """
@@ -1033,6 +1244,7 @@ def apply_media_info_results(request_id, url, media_info, error_message=None):
         return
 
     if error_message:
+        record_provider_check(url, error_message)
         latest_media_info = None
         if not audio_only.get():
             resolution_menu.set("Unavailable")
@@ -1041,6 +1253,7 @@ def apply_media_info_results(request_id, url, media_info, error_message=None):
         return
 
     if not media_info:
+        record_provider_check(url, "No media metadata returned")
         latest_media_info = None
         if not audio_only.get():
             resolution_menu.set("Unavailable")
@@ -1048,6 +1261,7 @@ def apply_media_info_results(request_id, url, media_info, error_message=None):
         show_preview_error()
         return
 
+    record_provider_check(url)
     latest_media_info = media_info
     capabilities = media_info.get("capabilities")
     if capabilities and not capabilities.audio_extraction and audio_only.get():
@@ -1076,7 +1290,7 @@ def fetch_media_info(url):
         bundle = media_service.inspect(url)
         return build_media_info(bundle), None
     except Exception as e:
-        error_message = clean_text(str(e)) or e.__class__.__name__
+        error_message = clean_text(user_facing_media_error(url, e)) or e.__class__.__name__
         print(f"❌ Error fetching media info: {error_message}")
         return None, error_message
 
@@ -1141,7 +1355,7 @@ def download_video(download_settings, cancel_event):
         print(f"Download cancelled: {e}")
         return False, str(e), None
     except Exception as e:
-        error_message = clean_text(str(e)) or e.__class__.__name__
+        error_message = clean_text(user_facing_media_error(url, e)) or e.__class__.__name__
         print(f"❌ Error downloading media: {error_message}")
         return False, error_message, None
 
@@ -1296,7 +1510,7 @@ def handle_page_mousewheel(event):
 # GUI Setup
 root = tk.Tk()
 root.title(APP_NAME)
-root.geometry("760x650")
+root.geometry("760x720")
 root.minsize(700, 500)
 set_app_icon(root)
 
@@ -1337,8 +1551,30 @@ root.bind_all("<Button-4>", handle_page_mousewheel, add="+")
 root.bind_all("<Button-5>", handle_page_mousewheel, add="+")
 main_frame.columnconfigure(0, weight=1)
 
+app_header_frame = ttk.Frame(main_frame)
+app_header_frame.grid(row=0, column=0, sticky="ew")
+app_header_frame.columnconfigure(0, weight=1)
+
+app_title_label = ttk.Label(
+    app_header_frame,
+    text=f"{APP_NAME}  v{APP_VERSION}",
+    font=("Segoe UI", 14, "bold"),
+)
+app_title_label.grid(row=0, column=0, sticky="w")
+
+info_button = ttk.Button(app_header_frame, text="ⓘ", width=3, command=show_about_dialog)
+info_button.grid(row=0, column=1, sticky="e")
+ToolTip(info_button, "About, supported media, project links, and current availability.")
+
+availability_frame = ttk.LabelFrame(main_frame, text="Media support", padding=(10, 7))
+availability_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+for provider_column in range(len(Provider)):
+    availability_frame.columnconfigure(provider_column, weight=1)
+for provider_column, provider in enumerate(Provider):
+    create_provider_status_widget(availability_frame, provider, provider_column)
+
 source_frame = ttk.LabelFrame(main_frame, text="Source", padding=10)
-source_frame.grid(row=0, column=0, sticky="ew")
+source_frame.grid(row=2, column=0, sticky="ew", pady=(12, 0))
 source_frame.columnconfigure(0, weight=1)
 
 url_frame = ttk.Frame(source_frame)
@@ -1367,7 +1603,7 @@ fetch_resolution_button = ttk.Button(url_frame, text="Check", command=update_res
 fetch_resolution_button.grid(row=0, column=4)
 
 preview_frame = ttk.LabelFrame(main_frame, text="Preview", padding=10)
-preview_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+preview_frame.grid(row=3, column=0, sticky="ew", pady=(12, 0))
 preview_frame.columnconfigure(1, weight=1)
 preview_frame.bind("<Configure>", update_preview_wraplength)
 
@@ -1397,7 +1633,7 @@ preview_details_label = ttk.Label(preview_frame, text="", wraplength=470, justif
 preview_details_label.grid(row=2, column=1, sticky="new", pady=(4, 0))
 
 download_frame = ttk.LabelFrame(main_frame, text="Download", padding=10)
-download_frame.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+download_frame.grid(row=4, column=0, sticky="ew", pady=(12, 0))
 download_frame.columnconfigure(1, weight=1)
 
 audio_checkbox = ttk.Checkbutton(download_frame, text="Audio only", variable=audio_only, command=toggle_audio_mode)
@@ -1457,7 +1693,7 @@ ToolTip(timestamp_checkbox, "When enabled, downloaded files use the media's uplo
 ToolTip(test_link_button, "Insert a tiny test video link.")
 
 destination_frame = ttk.LabelFrame(main_frame, text="Destination", padding=10)
-destination_frame.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+destination_frame.grid(row=5, column=0, sticky="ew", pady=(12, 0))
 destination_frame.columnconfigure(0, weight=1)
 
 folder_label = ttk.Label(destination_frame, text=f"Save to: {output_directory}", wraplength=680)
@@ -1473,7 +1709,7 @@ open_folder_button = ttk.Button(destination_frame, text="Open Folder", command=o
 open_folder_button.grid(row=1, column=2, sticky="w", pady=(8, 0))
 
 actions_frame = ttk.Frame(main_frame)
-actions_frame.grid(row=4, column=0, sticky="ew", pady=(14, 0))
+actions_frame.grid(row=6, column=0, sticky="ew", pady=(14, 0))
 actions_frame.columnconfigure(0, weight=1)
 
 download_button = tk.Button(
@@ -1493,7 +1729,7 @@ download_button = tk.Button(
 download_button.grid(row=0, column=0)
 
 support_frame = ttk.Frame(main_frame)
-support_frame.grid(row=5, column=0, sticky="ew", pady=(8, 0))
+support_frame.grid(row=7, column=0, sticky="ew", pady=(8, 0))
 support_frame.columnconfigure(0, weight=1)
 
 support_inner_frame = ttk.Frame(support_frame)
@@ -1525,10 +1761,10 @@ support_text_label.grid(row=1, column=0, pady=(4, 0))
 ToolTip(support_button, "Support future releases, dependency updates, and Windows testing.")
 
 status_frame = ttk.LabelFrame(main_frame, text="Status", padding=10)
-status_frame.grid(row=6, column=0, sticky="nsew", pady=(12, 0))
+status_frame.grid(row=8, column=0, sticky="nsew", pady=(12, 0))
 status_frame.columnconfigure(0, weight=1)
 status_frame.rowconfigure(2, weight=1)
-main_frame.rowconfigure(6, weight=1)
+main_frame.rowconfigure(8, weight=1)
 
 status_label = ttk.Label(status_frame, text="", wraplength=680, justify=tk.LEFT)
 status_label.grid(row=0, column=0, sticky="ew")

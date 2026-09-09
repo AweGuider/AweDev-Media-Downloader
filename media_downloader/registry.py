@@ -11,6 +11,10 @@ class AdapterRegistry:
             raise ValueError(f"An adapter is already registered for {adapter.provider.value}")
         self._adapters.append(adapter)
 
+    @property
+    def providers(self):
+        return tuple(adapter.provider for adapter in self._adapters)
+
     def resolve(self, url: str) -> MediaAdapter:
         for adapter in self._adapters:
             if adapter.supports(url):

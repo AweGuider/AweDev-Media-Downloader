@@ -8,10 +8,12 @@ A small Windows-first desktop downloader for saving media from supported social 
 - Download every image and video from a public Instagram post or carousel.
 - Download audio-only files as MP3, WAV, AAC, or FLAC.
 - Preview the checked media's thumbnail, title, creator, contents, and upload date before downloading.
+- See color-coded platform readiness and supported media immediately at startup.
 - Choose best available quality or a quality at or below the selected resolution.
 - Save repeated downloads with unique filenames.
 - Show dependency diagnostics for `yt-dlp`, `yt-dlp-ejs`, Instaloader, `curl-cffi`, JavaScript runtime support, `ffmpeg`, `ffprobe`, network access, and old PyInstaller temp folders.
 - Save user settings such as output folder, cleanup behavior, timestamp behavior, mode, and format.
+- Open the project, issue tracker, and AweDev links from the in-app information dialog.
 
 ## Support AweDev
 
@@ -59,6 +61,8 @@ Or run directly:
 python downloader.py
 ```
 
+New installations save downloads to `Downloads\AweDev-Media-Downloads` by default. Existing saved or custom output paths are preserved.
+
 ## Build A Release EXE
 
 Install build dependencies:
@@ -89,6 +93,8 @@ The build script asks for an EXE name, ZIP name, overwrite behavior, and whether
 - If diagnostics says `ffmpeg` or `ffprobe` is missing, install FFmpeg and make sure both tools are on `PATH`, or use the packaged EXE.
 - If diagnostics says JavaScript runtime support is missing, install Node or Deno, or use the packaged EXE.
 - If a URL cannot be checked, confirm the media is public, available in your region, and reachable in a browser without signing in.
+- Instagram Stories require login and are not supported. Use a Reel or post/carousel URL instead.
+- If a `tt.site` link fails, copy a `vm.tiktok.com` or direct TikTok video link; expired `tt.site` links can return a non-media response.
 - If the app creates a PyInstaller temp folder while running, that is expected for one-file EXEs. Clean shutdown should remove it; diagnostics warns about older leftovers.
 
 ## Limitations

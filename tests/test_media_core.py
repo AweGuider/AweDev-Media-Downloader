@@ -48,6 +48,7 @@ class MediaCoreTests(unittest.TestCase):
     def test_registry_resolves_or_rejects_url(self):
         instagram = InstagramAdapter(OptionsFactory())
         registry = AdapterRegistry([self.youtube, instagram])
+        self.assertEqual(registry.providers, (Provider.YOUTUBE, Provider.INSTAGRAM))
         self.assertIs(registry.resolve("https://music.youtube.com/watch?v=abc"), self.youtube)
         self.assertIs(registry.resolve("https://www.instagram.com/reel/example/"), instagram)
         self.assertIs(registry.resolve("https://www.instagram.com/p/example/"), instagram)
