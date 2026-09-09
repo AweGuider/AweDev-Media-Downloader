@@ -1,10 +1,10 @@
-# YouTube Downloader
+# AweDev Media Downloader
 
-A small Windows-first desktop downloader for saving individual YouTube videos or audio files. It wraps `yt-dlp` in a Tkinter GUI, bundles runtime helpers for release builds, and shows startup diagnostics so users can see whether downloader dependencies are healthy.
+A small Windows-first desktop downloader for saving media from supported social platforms. It wraps provider adapters in a Tkinter GUI, uses `yt-dlp` for video extraction, bundles runtime helpers for release builds, and shows startup diagnostics so users can see whether downloader dependencies are healthy.
 
 ## Features
 
-- Download one video URL at a time as MP4.
+- Download one public YouTube video or Instagram Reel URL at a time as MP4.
 - Download audio-only files as MP3, WAV, AAC, or FLAC.
 - Preview the checked video's thumbnail, title, readable length, channel, and upload date before downloading.
 - Choose best available quality or a quality at or below the selected resolution.
@@ -87,7 +87,7 @@ The build script asks for an EXE name, ZIP name, overwrite behavior, and whether
 - If diagnostics says `yt-dlp` is outdated, update the package in source builds or download a newer app release.
 - If diagnostics says `ffmpeg` or `ffprobe` is missing, install FFmpeg and make sure both tools are on `PATH`, or use the packaged EXE.
 - If diagnostics says JavaScript runtime support is missing, install Node or Deno, or use the packaged EXE.
-- If a URL cannot be checked, try another video and confirm the video is public, available in your region, and reachable in a browser.
+- If a URL cannot be checked, confirm the media is public, available in your region, and reachable in a browser without signing in.
 - If the app creates a PyInstaller temp folder while running, that is expected for one-file EXEs. Clean shutdown should remove it; diagnostics warns about older leftovers.
 
 ## Limitations
@@ -95,11 +95,12 @@ The build script asks for an EXE name, ZIP name, overwrite behavior, and whether
 - One URL at a time.
 - No playlist or batch downloads in the first release.
 - No DRM or copyright bypassing.
-- YouTube and `yt-dlp` behavior can change, so some failures may require dependency updates or a new app release.
+- Supported sites and `yt-dlp` behavior can change, so some failures may require dependency updates or a new app release.
+- Instagram authentication and private media are not supported.
 
 ## Legal Note
 
-Use this tool only for content you have the right to download. This project does not bypass DRM and does not grant rights to third-party content. You are responsible for following YouTube's terms and applicable law.
+Use this tool only for content you have the right to download. This project does not bypass DRM and does not grant rights to third-party content. You are responsible for following each source platform's terms and applicable law.
 
 Packaged releases may include third-party tools and packages such as `yt-dlp`, `yt-dlp-ejs`, `Pillow`, `ffmpeg`, `ffprobe`, and Node or Deno. Those components are governed by their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before publishing release binaries.
 

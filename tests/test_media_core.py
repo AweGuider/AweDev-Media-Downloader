@@ -4,6 +4,7 @@ from pathlib import Path
 
 from media_downloader import AdapterRegistry, MediaBundle, MediaType, Provider, UnsupportedUrlError
 from media_downloader.adapters.ytdlp_video import YtDlpVideoAdapter
+from media_downloader.adapters.instagram import InstagramAdapter
 from media_downloader.files import sanitize_filename, unique_destination_path
 
 
@@ -28,10 +29,19 @@ class MediaCoreTests(unittest.TestCase):
         self.assertFalse(self.youtube.supports("not-a-url"))
 
     def test_registry_resolves_or_rejects_url(self):
-        registry = AdapterRegistry([self.youtube])
+        instagram = InstagramAdapter(OptionsFactory())
+        registry = AdapterRegistry([self.youtube, instagram])
         self.assertIs(registry.resolve("https://music.youtube.com/watch?v=abc"), self.youtube)
+        self.assertIs(registry.resolve("https://www.instagram.com/reel/example/"), instagram)
         with self.assertRaises(UnsupportedUrlError):
-            registry.resolve("https://www.instagram.com/reel/example/")
+            registry.resolve("https://www.instagram.com/p/example/")
+
+    def test_instagram_adapter_only_claims_reels(self):
+        instagram = InstagramAdapter(OptionsFactory())
+        self.assertTrue(instagram.supports("https://www.instagram.com/reel/ABC123/"))
+        self.assertTrue(instagram.supports("https://instagram.com/user/reels/ABC123/?share=1"))
+        self.assertFalse(instagram.supports("https://www.instagram.com/p/ABC123/"))
+        self.assertFalse(instagram.supports("https://example.com/reel/ABC123/"))
 
     def test_duplicate_provider_registration_is_rejected(self):
         registry = AdapterRegistry([self.youtube])

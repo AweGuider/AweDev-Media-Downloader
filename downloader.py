@@ -29,12 +29,12 @@ from media_downloader import (
     MediaDownloadService,
     Provider,
 )
-from media_downloader.adapters import YtDlpVideoAdapter
+from media_downloader.adapters import InstagramAdapter, YtDlpVideoAdapter
 
 ### Command to create .exe out of .py
 # python -m PyInstaller --onefile downloader.py
 
-APP_NAME = "YouTube Downloader"
+APP_NAME = "AweDev Media Downloader"
 APP_ID = "AweDevYouTubeDownloader"
 SUPPORT_URL = "https://ko-fi.com/awedev"
 SUPPORT_LABEL = "☕ Buy a Cappuccino"
@@ -47,8 +47,8 @@ PREVIEW_IMAGE_SIZE = (200, 112)
 MAX_THUMBNAIL_BYTES = 4 * 1024 * 1024
 
 # Default output directory (current folder)
-# Set default output folder to "Downloads/YouTubeDownloads/"
-default_output_folder = os.path.join(os.path.expanduser("~"), "Downloads", "YouTubeDownloads")
+# Set the default output folder for new installations.
+default_output_folder = os.path.join(os.path.expanduser("~"), "Downloads", "AweDev Media Downloads")
 # Ensure the folder exists
 os.makedirs(default_output_folder, exist_ok=True)
 
@@ -249,6 +249,7 @@ adapter_registry = AdapterRegistry([
         options_factory=create_ytdlp_options,
         display_name="YouTube",
     ),
+    InstagramAdapter(create_ytdlp_options),
 ])
 media_service = MediaDownloadService(adapter_registry)
 
@@ -685,9 +686,19 @@ def format_live_status(info_dict):
 def format_preview_details(media_info):
     details = []
 
+    provider_labels = {
+        "youtube": "YouTube",
+        "instagram": "Instagram",
+        "facebook": "Facebook",
+        "tiktok": "TikTok",
+    }
+    provider = provider_labels.get(media_info.get("provider"))
+    if provider:
+        details.append(f"Source: {provider}")
+
     channel = media_info.get("channel")
     if channel:
-        details.append(f"Channel: {channel}")
+        details.append(f"Creator: {channel}")
 
     upload_date_text = media_info.get("upload_date_text")
     if upload_date_text:
