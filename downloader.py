@@ -1656,17 +1656,17 @@ url_entry.bind("<Control-a>", select_all_url)
 url_entry.bind("<Control-A>", select_all_url)
 url_entry.bind("<Control-BackSpace>", delete_previous_word)
 
-paste_button = ttk.Button(url_frame, text="Paste", command=paste_url_from_clipboard)
-paste_button.grid(row=0, column=1, padx=(0, 6))
-
 clear_button = ttk.Button(url_frame, text="Clear", command=clear_url)
-clear_button.grid(row=0, column=2, padx=(0, 6))
+clear_button.grid(row=0, column=1, padx=(0, 6))
 
-test_link_button = ttk.Button(url_frame, text="Test", command=insert_test_url)
-test_link_button.grid(row=0, column=3, padx=(0, 6))
+paste_button = ttk.Button(url_frame, text="Paste", command=paste_url_from_clipboard)
+paste_button.grid(row=0, column=2, padx=(0, 6))
 
 fetch_resolution_button = ttk.Button(url_frame, text="Check", command=update_resolution_options)
-fetch_resolution_button.grid(row=0, column=4)
+fetch_resolution_button.grid(row=0, column=3)
+
+test_link_button = ttk.Button(url_frame, text="Try example", command=insert_test_url)
+test_link_button.grid(row=1, column=0, sticky="w", pady=(8, 0))
 
 preview_frame = ttk.LabelFrame(main_frame, text="Preview", padding=10)
 preview_frame.grid(row=3, column=0, sticky="ew", pady=(12, 0))
@@ -1766,7 +1766,7 @@ group_multi_item_checkbox = ttk.Checkbutton(
 group_multi_item_checkbox.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
 group_multi_item_checkbox.grid_remove()
 ToolTip(group_multi_item_checkbox, "Shown for sources containing multiple media items. The preference is remembered.")
-ToolTip(test_link_button, "Insert a tiny test video link.")
+ToolTip(test_link_button, "Insert a tiny example video link.")
 
 destination_frame = ttk.LabelFrame(main_frame, text="Destination", padding=10)
 destination_frame.grid(row=5, column=0, sticky="ew", pady=(12, 0))
