@@ -1,0 +1,10 @@
+{
+  "available": true,
+  "version": "1.0.0",
+  "protocol_version": 1,
+  "url": "https://github.com/AweGuider/AweDev-Media-Downloader/releases/download/OCR_RELEASE_TAG/AweDevMediaOCR-windows-x64-1.0.0.zip",
+  "sha256": "REPLACE_WITH_64_CHARACTER_SHA256",
+  "worker": "AweDevMediaOCR.exe",
+  "download_size": 0,
+  "installed_size": 0
+}

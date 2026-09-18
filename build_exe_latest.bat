@@ -127,7 +127,7 @@ python -m PyInstaller ^
     --windowed ^
     --name "%FILE_NAME%" ^
     --icon "%ICON_PATH%" ^
-    --add-data "%ICON_PATH%;assets" ^
+    --add-data "assets;assets" ^
     --add-binary "%FFMPEG_PATH%;." ^
     --add-binary "%FFPROBE_PATH%;." ^
     --add-binary "%JS_RUNTIME_PATH%;." ^

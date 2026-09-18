@@ -25,3 +25,5 @@ Thumbs.db
 *.exe
 *.zip
 build_log*.txt
+ocr-component-stage/
+/assets/ocr-component.json

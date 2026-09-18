@@ -11,6 +11,8 @@ This project can package third-party tools so the Windows EXE works without a lo
 | `curl-cffi` | Installed through the `yt-dlp` extra | MIT license. Provides browser impersonation support used by volatile extractors such as TikTok. |
 | `Instaloader` | `instaloader>=4.15.3` | MIT license. Used for public Instagram picture, video-post, and carousel extraction. |
 | `Pillow` | `Pillow>=11.0.0` | Historical Permission Notice and Disclaimer license. Used for thumbnail preview image decoding and resizing. |
+| `RapidOCR` | `rapidocr==3.9.2` | Apache License 2.0. Used only by the separately distributed optional OCR component. Its bundled PaddleOCR-derived model files are also distributed under Apache License 2.0; include RapidOCR's package and model notices. |
+| `ONNX Runtime` | `onnxruntime==1.30.0` | MIT license. CPU inference runtime used only by the optional OCR component. |
 | `PyInstaller` | `pyinstaller>=6.21.0` | GPLv2-or-later with PyInstaller's bootloader exception for distributing bundled applications. Build-time dependency. |
 
 ## Runtime Binaries
@@ -23,4 +25,4 @@ This project can package third-party tools so the Windows EXE works without a lo
 
 ## Release Requirement
 
-Before attaching a ZIP or EXE to a public GitHub release, include the third-party license files/notices that match the exact bundled binaries. This matters most for `ffmpeg`/`ffprobe`, because the license obligations depend on the build configuration.
+Before attaching a ZIP or EXE to a public GitHub release, include the third-party license files/notices that match the exact bundled binaries. This matters most for `ffmpeg`/`ffprobe`, because the license obligations depend on the build configuration. The optional OCR ZIP must also include the RapidOCR, PaddleOCR model, ONNX Runtime, and transitive dependency notices produced by its final build environment.

@@ -15,6 +15,7 @@
 - Save repeated downloads with unique filenames.
 - Show dependency diagnostics for `yt-dlp`, `yt-dlp-ejs`, Instaloader, `curl-cffi`, JavaScript runtime support, `ffmpeg`, `ffprobe`, network access, and old PyInstaller temp folders.
 - Save user settings such as output folder, cleanup behavior, timestamp behavior, folder-opening behavior, mode, and format.
+- Optionally extract visible text into `.ocr.txt` sidecars through a separately downloaded OCR component.
 - Open the project, issue tracker, and AweDev links from the in-app information dialog.
 
 ## Support AweDev
@@ -35,6 +36,8 @@ The first public release target is Windows. The source may run on other platform
 4. If Windows SmartScreen appears, review the publisher/file details and choose whether to run it.
 
 The release EXE is intended to include the needed Python app package, thumbnail preview support, `ffmpeg`, `ffprobe`, and a JavaScript runtime used by `yt-dlp`.
+
+Visible-text extraction is an optional component and is not bundled into the main EXE. When a release provides a verified OCR component, enabling **Extract visible text from media** offers to download it from this project's GitHub Releases page. The component is stored under `%LOCALAPPDATA%\AweDevMediaDownloader\components\ocr`, and OCR processing stays local. Disabling OCR leaves the component installed; use **Remove component** to reclaim its disk space.
 
 ## Run From Source
 
@@ -88,6 +91,22 @@ build_exe_latest.bat
 ```
 
 The build script asks for an EXE name, ZIP name, overwrite behavior, and whether to create a ZIP. Generated EXEs, ZIPs, logs, PyInstaller output, and `.spec` files are ignored by Git.
+
+## Build The Optional OCR Component
+
+Install its separate build dependencies:
+
+```bat
+python -m pip install -r requirements-ocr-build.txt
+```
+
+Then run:
+
+```bat
+build_ocr_component.bat
+```
+
+The script builds and self-tests `AweDevMediaOCR.exe`, packages it with its component metadata, and calculates the ZIP's SHA-256 and sizes. Enter the planned release tag when prompted to generate `assets\ocr-component.json`, upload the ZIP to that version-specific GitHub release, and then build the main application so it embeds the verified manifest. Publish the release as immutable after both assets are attached.
 
 ## Troubleshooting
 

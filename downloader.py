@@ -44,6 +44,11 @@ from media_downloader.health import (
     provider_health,
 )
 from media_downloader.url_feedback import provider_from_url, user_facing_media_error
+from media_downloader.ocr_component import (
+    OcrComponentCancelled,
+    OcrComponentManager,
+)
+from media_downloader.ocr_postprocess import extract_visible_text
 
 ### Command to create .exe out of .py
 # python -m PyInstaller --onefile downloader.py
@@ -107,6 +112,8 @@ url_ready_for_download = False
 latest_media_info = None
 download_thread = None
 download_cancel_event = None
+ocr_install_thread = None
+ocr_install_cancel_event = None
 is_closing = False
 ui_queue = queue.Queue()
 startup_diagnostic_results = None
@@ -134,6 +141,20 @@ def app_runtime_dir():
 def app_resource_path(*parts):
     return os.path.join(app_runtime_dir(), *parts)
 
+def ocr_component_manifest_path():
+    configured_path = os.environ.get("AWEDEV_OCR_COMPONENT_MANIFEST")
+    if configured_path:
+        return configured_path
+    release_manifest = app_resource_path("assets", "ocr-component.json")
+    if os.path.isfile(release_manifest):
+        return release_manifest
+    return app_resource_path("assets", "ocr-component.unavailable.json")
+
+ocr_component_manager = OcrComponentManager.from_manifest_path(
+    Path(ocr_component_manifest_path()),
+    APP_ID,
+)
+
 def set_app_icon(window):
     icon_path = app_resource_path("assets", "app.ico")
     if not os.path.exists(icon_path):
@@ -154,6 +175,7 @@ def save_settings():
         "preserve_upload_date": preserve_upload_date.get(),
         "group_multi_item": group_multi_item.get(),
         "open_folder_after_download": open_folder_after_download.get(),
+        "extract_visible_text": extract_visible_text_enabled.get(),
     }
 
     try:
@@ -480,6 +502,15 @@ def run_startup_diagnostics():
     results.append(check_js_runtime())
     results.append(check_network())
     results.append(check_pyinstaller_temp_leftovers())
+    ocr_status = ocr_component_manager.status_text()
+    ocr_state = (
+        "warn"
+        if ocr_component_manager.manifest.available
+        and ocr_component_manager.install_directory.exists()
+        and not ocr_component_manager.is_installed()
+        else "pass"
+    )
+    results.append(diagnostic(ocr_state, "Optional OCR component", ocr_status))
     return results
 
 def format_diagnostics(results, media_health=()):
@@ -733,8 +764,12 @@ def process_ui_queue():
             apply_media_info_results(*args)
         elif action == "download_done":
             update_ui_after_download(*args)
+        elif action == "ocr_install_progress":
+            update_ocr_install_progress(*args)
+        elif action == "ocr_install_done":
+            update_ui_after_ocr_install(*args)
 
-    if not is_closing or download_is_active():
+    if not is_closing or download_is_active() or ocr_install_is_active():
         root.after(100, process_ui_queue)
 
 def queue_status(text):
@@ -742,6 +777,9 @@ def queue_status(text):
 
 def download_is_active():
     return download_thread is not None and download_thread.is_alive()
+
+def ocr_install_is_active():
+    return ocr_install_thread is not None and ocr_install_thread.is_alive()
 
 def set_download_button_enabled(enabled):
     if "download_button" in globals():
@@ -790,6 +828,145 @@ def toggle_group_multi_item():
     save_settings()
     if url_ready_for_download and latest_media_info and not download_is_active():
         status_label.config(text=multi_item_ready_text(latest_media_info))
+
+def update_ocr_component_controls():
+    if "ocr_component_status_label" not in globals():
+        return
+    installed = ocr_component_manager.is_installed()
+    ocr_component_status_label.config(text=ocr_component_manager.status_text())
+    if ocr_install_is_active():
+        remove_ocr_component_button.grid_remove()
+        cancel_ocr_install_button.grid()
+    elif installed:
+        remove_ocr_component_button.grid()
+        cancel_ocr_install_button.grid_remove()
+    else:
+        remove_ocr_component_button.grid_remove()
+        cancel_ocr_install_button.grid_remove()
+    controls_enabled = (
+        not ocr_install_is_active()
+        and not download_is_active()
+        and not audio_only.get()
+    )
+    visible_text_checkbox.config(state=tk.NORMAL if controls_enabled else tk.DISABLED)
+    remove_ocr_component_button.config(state=tk.NORMAL if controls_enabled else tk.DISABLED)
+
+def cancel_ocr_component_install():
+    if ocr_install_cancel_event:
+        ocr_install_cancel_event.set()
+        ocr_component_status_label.config(text="Canceling OCR component installation...")
+        cancel_ocr_install_button.config(state=tk.DISABLED)
+
+def toggle_visible_text_extraction():
+    global ocr_install_thread, ocr_install_cancel_event
+
+    if not extract_visible_text_enabled.get():
+        save_settings()
+        update_ocr_component_controls()
+        return
+
+    if ocr_component_manager.is_installed():
+        save_settings()
+        update_ocr_component_controls()
+        return
+
+    extract_visible_text_enabled.set(False)
+    if not ocr_component_manager.manifest.available:
+        messagebox.showinfo(
+            "OCR Component Unavailable",
+            "This app build does not include a verified OCR component download.\n\n"
+            "Install a newer release when the optional component is published.",
+        )
+        update_ocr_component_controls()
+        return
+
+    confirmed = messagebox.askyesno(
+        "Download Optional OCR Component",
+        "Visible-text extraction requires the optional OCR component.\n\n"
+        f"{ocr_component_manager.size_summary()}\n\n"
+        "The component is downloaded from this project's GitHub Releases page. "
+        "Text recognition runs locally after installation.\n\n"
+        "Download and enable it now?",
+    )
+    if not confirmed:
+        update_ocr_component_controls()
+        return
+
+    ocr_install_cancel_event = threading.Event()
+    ocr_component_status_label.config(text="Downloading OCR component...")
+    visible_text_checkbox.config(state=tk.DISABLED)
+    remove_ocr_component_button.config(state=tk.DISABLED)
+
+    def worker():
+        try:
+            ocr_component_manager.install(
+                progress=lambda downloaded, total: queue_ui(
+                    "ocr_install_progress", downloaded, total,
+                ),
+                cancel_event=ocr_install_cancel_event,
+            )
+            queue_ui("ocr_install_done", True, None)
+        except Exception as error:
+            queue_ui("ocr_install_done", False, str(error))
+
+    ocr_install_thread = threading.Thread(target=worker, daemon=True)
+    ocr_install_thread.start()
+    update_ocr_component_controls()
+
+def update_ocr_install_progress(downloaded, total):
+    if total:
+        percent = min(100, int(downloaded * 100 / total))
+        ocr_component_status_label.config(text=f"Downloading OCR component... {percent}%")
+    else:
+        ocr_component_status_label.config(text=f"Downloading OCR component... {downloaded // (1024 * 1024)} MB")
+
+def update_ui_after_ocr_install(success, error_message=None):
+    global ocr_install_thread, ocr_install_cancel_event
+
+    ocr_install_thread = None
+    ocr_install_cancel_event = None
+    cancel_ocr_install_button.config(state=tk.NORMAL)
+    if success:
+        extract_visible_text_enabled.set(True)
+        save_settings()
+        if not is_closing:
+            messagebox.showinfo(
+                "OCR Component Installed",
+                "The optional OCR component was installed and visible-text extraction is now enabled.",
+            )
+    else:
+        extract_visible_text_enabled.set(False)
+        save_settings()
+        if (
+            not is_closing
+            and error_message
+            and error_message != "OCR component installation cancelled."
+        ):
+            messagebox.showerror("OCR Installation Failed", error_message)
+    if is_closing and not download_is_active():
+        root.destroy()
+        return
+    update_ocr_component_controls()
+    run_startup_diagnostics_async()
+
+def remove_ocr_component():
+    if download_is_active() or ocr_install_is_active():
+        messagebox.showwarning("OCR Component Busy", "Wait for the current operation to finish first.")
+        return
+    if not messagebox.askyesno(
+        "Remove OCR Component",
+        "Remove the optional OCR component and reclaim its disk space?",
+    ):
+        return
+    try:
+        ocr_component_manager.remove()
+    except OSError as error:
+        messagebox.showerror("Could Not Remove OCR Component", str(error))
+        return
+    extract_visible_text_enabled.set(False)
+    save_settings()
+    update_ocr_component_controls()
+    run_startup_diagnostics_async()
 
 def set_link_ready(is_ready, status_text=None):
     global url_ready_for_download
@@ -878,6 +1055,7 @@ def toggle_audio_mode():
         resolution_label.grid()
         resolution_dropdown.grid()
     set_quality_state(url_ready_for_download)
+    update_ocr_component_controls()
     save_settings()
 
 def clean_text(text):
@@ -1190,6 +1368,7 @@ def download_video_gui():
         "cleanup_enabled": delete_temp_files.get(),
         "preserve_upload_date": preserve_upload_date.get(),
         "group_multi_item": group_multi_item.get(),
+        "extract_visible_text": extract_visible_text_enabled.get(),
         "media_title": media_info.get("title") if media_info else None,
         "upload_date": media_info.get("upload_date") if media_info else None,
         "bundle": media_info.get("bundle") if media_info else None,
@@ -1206,6 +1385,7 @@ def download_video_gui():
         args=(download_settings, download_cancel_event),
     )
     download_thread.start()
+    update_ocr_component_controls()
 
 def update_resolution_options(*args):
     """Debounces media metadata fetching while the URL is being edited."""
@@ -1317,22 +1497,24 @@ def fetch_media_info(url):
 
 def download_video_thread(download_settings, cancel_event):
     """ Runs the video download process in a separate thread. """
-    success, error_message, final_path = download_video(download_settings, cancel_event)
-    queue_ui("download_done", success, error_message, final_path)
+    success, error_message, final_path, warning_message = download_video(download_settings, cancel_event)
+    queue_ui("download_done", success, error_message, final_path, warning_message)
 
-def update_ui_after_download(success, error_message=None, final_paths=None):
+def update_ui_after_download(success, error_message=None, final_paths=None, warning_message=None):
     """ Updates the UI after the download is completed. """
     global download_thread, download_cancel_event
 
     download_thread = None
     download_cancel_event = None
 
-    if is_closing:
+    if is_closing and not ocr_install_is_active():
         root.destroy()
+        return
+    if is_closing:
         return
 
     if success:
-        status_label.config(text="Download complete")
+        status_label.config(text="Download complete" if not warning_message else "Download complete with OCR warning")
         saved_paths = list(final_paths or [])
         if len(saved_paths) == 1:
             completion_message = f"File saved to:\n{saved_paths[0]}"
@@ -1340,7 +1522,11 @@ def update_ui_after_download(success, error_message=None, final_paths=None):
             parent_paths = {os.path.dirname(path) for path in saved_paths}
             saved_location = parent_paths.pop() if len(parent_paths) == 1 else output_directory
             completion_message = f"{len(saved_paths)} files saved to:\n{saved_location}"
-        messagebox.showinfo("Download Complete", completion_message)
+        if warning_message:
+            completion_message += f"\n\nVisible-text extraction was skipped:\n{warning_message}"
+            messagebox.showwarning("Download Complete", completion_message)
+        else:
+            messagebox.showinfo("Download Complete", completion_message)
         if open_folder_after_download.get():
             open_download_folder()
     else:
@@ -1350,6 +1536,7 @@ def update_ui_after_download(success, error_message=None, final_paths=None):
             messagebox.showerror("Download Failed", details)
 
     set_download_button_enabled(url_ready_for_download)
+    update_ocr_component_controls()
 
 def download_video(download_settings, cancel_event):
     """Downloads inspected media through its registered provider adapter."""
@@ -1374,15 +1561,32 @@ def download_video(download_settings, cancel_event):
             group_multi_item=download_settings["group_multi_item"],
         )
         result = media_service.download(bundle, options, cancel_event, make_progress_hook(cancel_event))
-        return True, None, tuple(str(path) for path in result.files)
+        output_files = tuple(result.files)
+        warning_message = None
+        if download_settings.get("extract_visible_text"):
+            queue_status("Extracting visible text...")
+            try:
+                ocr_files = extract_visible_text(
+                    ocr_component_manager,
+                    output_files,
+                    cancel_event=cancel_event,
+                    sample_fps=1.0,
+                    max_frames=300,
+                )
+                output_files += ocr_files
+            except OcrComponentCancelled:
+                raise DownloadCancelled("Download cancelled")
+            except Exception as error:
+                warning_message = clean_text(str(error)) or error.__class__.__name__
+        return True, None, tuple(str(path) for path in output_files), warning_message
 
     except DownloadCancelled as e:
         print(f"Download cancelled: {e}")
-        return False, str(e), None
+        return False, str(e), None, None
     except Exception as e:
         error_message = clean_text(user_facing_media_error(url, e)) or e.__class__.__name__
         print(f"❌ Error downloading media: {error_message}")
-        return False, error_message, None
+        return False, error_message, None, None
 
 # Function to clear the URL entry box
 def clear_url():
@@ -1516,11 +1720,13 @@ def on_close():
 
     save_settings()
 
-    if download_is_active():
+    if download_is_active() or ocr_install_is_active():
         is_closing = True
         if download_cancel_event:
             download_cancel_event.set()
-        status_label.config(text="Canceling active download and cleaning up...")
+        if ocr_install_cancel_event:
+            ocr_install_cancel_event.set()
+        status_label.config(text="Canceling active work and cleaning up...")
         download_button.config(state=tk.DISABLED)
         return
 
@@ -1569,6 +1775,11 @@ delete_temp_files = tk.BooleanVar(value=bool(saved_settings.get("delete_temp_fil
 preserve_upload_date = tk.BooleanVar(value=bool(saved_settings.get("preserve_upload_date", True)))
 group_multi_item = tk.BooleanVar(value=bool(saved_settings.get("group_multi_item", True)))
 open_folder_after_download = tk.BooleanVar(value=bool(saved_settings.get("open_folder_after_download", True)))
+ocr_setting_was_reset = bool(saved_settings.get("extract_visible_text", False)) and not ocr_component_manager.is_installed()
+extract_visible_text_enabled = tk.BooleanVar(
+    value=bool(saved_settings.get("extract_visible_text", False))
+    and ocr_component_manager.is_installed()
+)
 audio_only = tk.BooleanVar(value=bool(saved_settings.get("audio_only", False)))
 saved_audio_format = saved_settings.get("audio_format")
 selected_audio_format = tk.StringVar(value=saved_audio_format if saved_audio_format in AUDIO_FORMATS else DEFAULT_AUDIO_FORMAT)
@@ -1771,6 +1982,44 @@ group_multi_item_checkbox.grid_remove()
 ToolTip(group_multi_item_checkbox, "Shown for sources containing multiple media items. The preference is remembered.")
 ToolTip(test_link_button, "Insert a tiny example video link.")
 
+visible_text_frame = ttk.Frame(options_frame)
+visible_text_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+visible_text_frame.columnconfigure(1, weight=1)
+
+visible_text_checkbox = ttk.Checkbutton(
+    visible_text_frame,
+    text="Extract visible text from media",
+    variable=extract_visible_text_enabled,
+    command=toggle_visible_text_extraction,
+)
+visible_text_checkbox.grid(row=0, column=0, sticky="w", padx=(0, 8))
+ToolTip(
+    visible_text_checkbox,
+    "Creates .ocr.txt files. Videos are sampled once per second, up to 300 frames.",
+)
+
+ocr_component_status_label = ttk.Label(
+    visible_text_frame,
+    text=ocr_component_manager.status_text(),
+    foreground="#5f6368",
+    font=("Segoe UI", 8),
+)
+ocr_component_status_label.grid(row=0, column=1, sticky="w")
+
+remove_ocr_component_button = ttk.Button(
+    visible_text_frame,
+    text="Remove component",
+    command=remove_ocr_component,
+)
+remove_ocr_component_button.grid(row=0, column=2, sticky="e")
+
+cancel_ocr_install_button = ttk.Button(
+    visible_text_frame,
+    text="Cancel",
+    command=cancel_ocr_component_install,
+)
+cancel_ocr_install_button.grid(row=0, column=3, sticky="e")
+
 destination_frame = ttk.LabelFrame(main_frame, text="Destination", padding=10)
 destination_frame.grid(row=5, column=0, sticky="ew", pady=(12, 0))
 destination_frame.columnconfigure(0, weight=1)
@@ -1900,6 +2149,9 @@ hide_diagnostics()
 reset_media_preview()
 toggle_audio_mode()
 set_link_ready(False)
+update_ocr_component_controls()
+if ocr_setting_was_reset:
+    save_settings()
 root.protocol("WM_DELETE_WINDOW", on_close)
 process_ui_queue()
 run_startup_diagnostics_async()
