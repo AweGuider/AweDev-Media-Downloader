@@ -6,6 +6,7 @@
 
 - Download one public YouTube, Instagram Reel, Facebook video, or TikTok video URL at a time as MP4.
 - Download every image and video from a public Instagram post or carousel.
+- Save the original post caption or description as a UTF-8 text file when it is available.
 - Download audio-only files as MP3, WAV, AAC, or FLAC.
 - Preview the checked media's thumbnail, title, creator, contents, and upload date before downloading.
 - See color-coded platform readiness and supported media immediately at startup.

@@ -25,6 +25,22 @@ def unique_destination_path(directory: Path, filename: str) -> Path:
     return candidate
 
 
+def write_description_sidecar(
+    staging_directory: Path,
+    base_name: str,
+    description: str | None,
+) -> Path | None:
+    if not description or not description.strip():
+        return None
+
+    sidecar_path = unique_destination_path(
+        staging_directory,
+        f"{sanitize_filename(base_name)}.txt",
+    )
+    sidecar_path.write_text(description, encoding="utf-8", newline="")
+    return sidecar_path
+
+
 def move_downloads(staging_directory: Path, output_directory: Path) -> tuple[Path, ...]:
     output_directory.mkdir(parents=True, exist_ok=True)
     files = sorted(

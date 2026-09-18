@@ -7,7 +7,7 @@ import yt_dlp
 
 from .base import MediaAdapter, ProgressHook
 from ..errors import DownloadCancelled
-from ..files import finalize_downloads, move_downloads, sanitize_filename
+from ..files import finalize_downloads, move_downloads, sanitize_filename, write_description_sidecar
 from ..models import (
     DownloadCapabilities,
     DownloadOptions,
@@ -87,6 +87,10 @@ class YtDlpVideoAdapter(MediaAdapter):
             provider=self.provider,
             source_url=url,
             title=title,
+            description=info.get("description") or next(
+                (item_info.get("description") for item_info in item_infos if item_info.get("description")),
+                None,
+            ),
             creator=info.get("channel") or info.get("uploader") or "",
             upload_date=info.get("upload_date") or items[0].upload_date,
             duration=info.get("duration") if info.get("duration") is not None else items[0].duration,
@@ -120,8 +124,9 @@ class YtDlpVideoAdapter(MediaAdapter):
         progress_hook: ProgressHook | None = None,
     ) -> DownloadResult:
         staging_directory = Path(tempfile.mkdtemp(prefix="awedev-media-"))
-        title = sanitize_filename(bundle.title).replace("%", "%%")
-        output_template = str(staging_directory / f"{title}.%(ext)s")
+        title = sanitize_filename(bundle.title)
+        output_title = title.replace("%", "%%")
+        output_template = str(staging_directory / f"{output_title}.%(ext)s")
 
         def progress(info):
             if cancel_event.is_set():
@@ -159,6 +164,7 @@ class YtDlpVideoAdapter(MediaAdapter):
                 raise DownloadCancelled("Download cancelled")
             with yt_dlp.YoutubeDL(self._options_factory(download_options)) as ydl:
                 ydl.download([bundle.source_url])
+            write_description_sidecar(staging_directory, title, bundle.description)
             files = move_downloads(staging_directory, options.output_directory)
             finalize_downloads(files, bundle.upload_date, options.preserve_upload_date)
             return DownloadResult(files=files)

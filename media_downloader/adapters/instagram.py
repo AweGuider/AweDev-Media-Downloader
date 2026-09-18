@@ -8,7 +8,7 @@ import instaloader
 from .base import MediaAdapter
 from .ytdlp_video import YtDlpVideoAdapter
 from ..errors import DownloadCancelled
-from ..files import finalize_downloads, move_downloads, sanitize_filename
+from ..files import finalize_downloads, move_downloads, sanitize_filename, write_description_sidecar
 from ..models import (
     DownloadCapabilities,
     DownloadOptions,
@@ -94,6 +94,7 @@ class InstagramAdapter(MediaAdapter):
             provider=self.provider,
             source_url=url,
             title=title,
+            description=getattr(post, "caption", None),
             creator=creator,
             upload_date=upload_date,
             thumbnail_url=_first_thumbnail(item_media),
@@ -164,6 +165,7 @@ class InstagramAdapter(MediaAdapter):
                     post.date_utc,
                 )
 
+            write_description_sidecar(staging_directory, base_name, bundle.description)
             files = move_downloads(staging_directory, options.output_directory)
             finalize_downloads(files, bundle.upload_date, options.preserve_upload_date)
             return DownloadResult(files=files)

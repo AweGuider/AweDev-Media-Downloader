@@ -11,7 +11,7 @@ from media_downloader.adapters.facebook import FacebookAdapter
 from media_downloader.adapters.ytdlp_video import YtDlpVideoAdapter
 from media_downloader.adapters.instagram import InstagramAdapter
 from media_downloader.adapters.tiktok import TikTokAdapter
-from media_downloader.files import sanitize_filename, unique_destination_path
+from media_downloader.files import sanitize_filename, unique_destination_path, write_description_sidecar
 
 
 class OptionsFactory:
@@ -69,6 +69,7 @@ class MediaCoreTests(unittest.TestCase):
             typename="GraphSidecar",
             owner_username="creator",
             date_utc=datetime(2026, 9, 8),
+            caption="First line\nEmoji: 🎉 #launch @creator",
             get_sidecar_nodes=lambda: (
                 SimpleNamespace(
                     is_video=False,
@@ -94,6 +95,7 @@ class MediaCoreTests(unittest.TestCase):
         self.assertEqual(len(bundle.items), 2)
         self.assertEqual(bundle.creator, "creator")
         self.assertEqual(bundle.upload_date, "20260908")
+        self.assertEqual(bundle.description, "First line\nEmoji: 🎉 #launch @creator")
         with tempfile.TemporaryDirectory() as temp_directory:
             result = instagram.download(
                 bundle,
@@ -105,8 +107,12 @@ class MediaCoreTests(unittest.TestCase):
                 ),
                 cancel_event=threading.Event(),
             )
-            self.assertEqual([path.suffix for path in result.files], [".jpg", ".mp4"])
+            self.assertEqual([path.suffix for path in result.files], [".jpg", ".mp4", ".txt"])
             self.assertTrue(all(path.exists() for path in result.files))
+            self.assertEqual(
+                next(path for path in result.files if path.suffix == ".txt").read_text(encoding="utf-8"),
+                fake_post.caption,
+            )
 
         self.assertEqual(
             fake_loader.downloaded_urls,
@@ -181,6 +187,7 @@ class MediaCoreTests(unittest.TestCase):
                 return {
                     "id": "123456789",
                     "title": "Test TikTok",
+                    "description": "TikTok caption #test",
                     "uploader": "creator",
                     "upload_date": "20260909",
                     "duration": 12,
@@ -193,9 +200,49 @@ class MediaCoreTests(unittest.TestCase):
 
         self.assertEqual(bundle.provider, Provider.TIKTOK)
         self.assertEqual(bundle.title, "Test TikTok")
+        self.assertEqual(bundle.description, "TikTok caption #test")
         self.assertEqual(bundle.creator, "creator")
         self.assertEqual(bundle.items[0].resolutions, ("720p",))
         self.assertTrue(bundle.capabilities.audio_extraction)
+
+    def test_ytdlp_download_writes_description_sidecar(self):
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                self.options = options
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def download(self, _urls):
+                output_path = self.options["outtmpl"].replace("%%", "%").replace("%(ext)s", "mp4")
+                Path(output_path).write_bytes(b"test media")
+
+        bundle = MediaBundle(
+            provider=Provider.YOUTUBE,
+            source_url="https://youtu.be/example",
+            title="Test 100% video",
+            description="YouTube description\nSecond line",
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            with patch("media_downloader.adapters.ytdlp_video.yt_dlp.YoutubeDL", FakeYoutubeDL):
+                result = self.youtube.download(
+                    bundle,
+                    options=SimpleNamespace(
+                        output_directory=Path(temp_directory),
+                        resolution="Highest Available",
+                        audio_only=False,
+                        audio_format="mp3",
+                        preserve_upload_date=False,
+                        cleanup_enabled=True,
+                    ),
+                    cancel_event=threading.Event(),
+                )
+
+            self.assertEqual([path.name for path in result.files], ["Test 100% video.mp4", "Test 100% video.txt"])
+            self.assertEqual(result.files[1].read_text(encoding="utf-8"), bundle.description)
 
     def test_media_bundle_type_defaults_to_video(self):
         bundle = MediaBundle(provider=Provider.YOUTUBE, source_url="https://youtu.be/a", title="A")
@@ -207,6 +254,17 @@ class MediaCoreTests(unittest.TestCase):
             directory = Path(temp_directory)
             (directory / "video.mp4").touch()
             self.assertEqual(unique_destination_path(directory, "video.mp4").name, "video (1).mp4")
+
+    def test_description_sidecar_preserves_text_and_skips_empty_values(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            directory = Path(temp_directory)
+            description = "First line\n\nEmoji: 🎉 #launch @creator"
+
+            sidecar = write_description_sidecar(directory, 'A <post>: "test"', description)
+
+            self.assertEqual(sidecar.name, "A _post__ _test_.txt")
+            self.assertEqual(sidecar.read_bytes(), description.encode("utf-8"))
+            self.assertIsNone(write_description_sidecar(directory, "empty", "  \n"))
 
 
 if __name__ == "__main__":

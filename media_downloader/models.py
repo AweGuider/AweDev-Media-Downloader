@@ -46,6 +46,7 @@ class MediaBundle:
     live_status: str | None = None
     items: tuple[MediaItem, ...] = ()
     capabilities: DownloadCapabilities = field(default_factory=DownloadCapabilities)
+    description: str | None = None
 
     @property
     def media_type(self):
