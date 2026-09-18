@@ -7,7 +7,7 @@ import yt_dlp
 
 from .base import MediaAdapter, ProgressHook
 from ..errors import DownloadCancelled
-from ..files import finalize_downloads, move_downloads, sanitize_filename, write_description_sidecar
+from ..files import finalize_downloads, media_output_stem, move_downloads, write_description_sidecar
 from ..models import (
     DownloadCapabilities,
     DownloadOptions,
@@ -124,7 +124,8 @@ class YtDlpVideoAdapter(MediaAdapter):
         progress_hook: ProgressHook | None = None,
     ) -> DownloadResult:
         staging_directory = Path(tempfile.mkdtemp(prefix="awedev-media-"))
-        title = sanitize_filename(bundle.title)
+        media_id = bundle.items[0].media_id if bundle.items else None
+        title = media_output_stem(bundle.title, media_id)
         output_title = title.replace("%", "%%")
         output_template = str(staging_directory / f"{output_title}.%(ext)s")
 

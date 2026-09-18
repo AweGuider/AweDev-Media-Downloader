@@ -12,6 +12,18 @@ def sanitize_filename(filename: str, fallback: str = "output") -> str:
     return sanitized[:180] or fallback
 
 
+def media_output_stem(title: str, media_id: str | None) -> str:
+    safe_title = sanitize_filename(title)
+    safe_id = sanitize_filename(str(media_id), fallback="")[:64] if media_id else ""
+    identifier = f"[{safe_id}]" if safe_id else ""
+    if not identifier or safe_title.endswith(identifier):
+        return safe_title
+
+    suffix = f" {identifier}"
+    title_limit = max(1, 180 - len(suffix))
+    return f"{safe_title[:title_limit].rstrip()}{suffix}"
+
+
 def unique_destination_path(directory: Path, filename: str) -> Path:
     candidate = directory / filename
     stem = candidate.stem

@@ -6,13 +6,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from media_downloader import AdapterRegistry, MediaBundle, MediaType, Provider, UnsupportedUrlError
+from media_downloader import AdapterRegistry, MediaBundle, MediaItem, MediaType, Provider, UnsupportedUrlError
 from media_downloader.adapters.facebook import FacebookAdapter
 from media_downloader.adapters.ytdlp_video import YtDlpVideoAdapter
 from media_downloader.adapters.instagram import InstagramAdapter
 from media_downloader.adapters.tiktok import TikTokAdapter
 from media_downloader.files import (
     move_downloads,
+    media_output_stem,
     sanitize_filename,
     unique_destination_path,
     write_description_sidecar,
@@ -252,6 +253,7 @@ class MediaCoreTests(unittest.TestCase):
             source_url="https://youtu.be/example",
             title="Test 100% video",
             description="YouTube description\nSecond line",
+            items=(MediaItem(media_id="abc123", media_type=MediaType.VIDEO, title="Test 100% video"),),
         )
         with tempfile.TemporaryDirectory() as temp_directory:
             with patch("media_downloader.adapters.ytdlp_video.yt_dlp.YoutubeDL", FakeYoutubeDL):
@@ -269,8 +271,22 @@ class MediaCoreTests(unittest.TestCase):
                     cancel_event=threading.Event(),
                 )
 
-            self.assertEqual([path.name for path in result.files], ["Test 100% video.mp4", "Test 100% video.txt"])
+            self.assertEqual(
+                [path.name for path in result.files],
+                ["Test 100% video [abc123].mp4", "Test 100% video [abc123].txt"],
+            )
             self.assertEqual(result.files[1].read_text(encoding="utf-8"), bundle.description)
+
+    def test_media_output_stem_preserves_unique_id_for_long_titles(self):
+        stem = media_output_stem("A" * 180, "unique-id")
+
+        self.assertEqual(len(stem), 180)
+        self.assertTrue(stem.endswith(" [unique-id]"))
+        self.assertEqual(media_output_stem("Existing [abc123]", "abc123"), "Existing [abc123]")
+        self.assertNotEqual(
+            media_output_stem("Video by creator", "first-id"),
+            media_output_stem("Video by creator", "second-id"),
+        )
 
     def test_grouped_downloads_use_unique_folders(self):
         with tempfile.TemporaryDirectory() as temp_directory:
