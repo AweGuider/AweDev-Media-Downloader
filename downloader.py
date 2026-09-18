@@ -152,6 +152,7 @@ def save_settings():
         "audio_format": selected_audio_format.get(),
         "delete_temp_files": delete_temp_files.get(),
         "preserve_upload_date": preserve_upload_date.get(),
+        "group_multi_item": group_multi_item.get(),
     }
 
     try:
@@ -768,11 +769,34 @@ def set_quality_state(enabled):
         audio_format_dropdown.config(state="disabled")
         resolution_dropdown.config(state="readonly" if enabled and quality_supported else "disabled")
 
+def set_multi_item_option_visible(visible):
+    if "group_multi_item_checkbox" not in globals():
+        return
+    if visible:
+        group_multi_item_checkbox.grid()
+    else:
+        group_multi_item_checkbox.grid_remove()
+
+def multi_item_ready_text(media_info):
+    item_count = media_info.get("item_count") or 1
+    if item_count <= 1:
+        return "Ready to download."
+    if group_multi_item.get():
+        return f"Ready to download {item_count} items into one folder."
+    return f"Ready to download {item_count} items."
+
+def toggle_group_multi_item():
+    save_settings()
+    if url_ready_for_download and latest_media_info and not download_is_active():
+        status_label.config(text=multi_item_ready_text(latest_media_info))
+
 def set_link_ready(is_ready, status_text=None):
     global url_ready_for_download
     url_ready_for_download = is_ready
     set_download_button_enabled(is_ready and not download_is_active())
     set_quality_state(is_ready)
+    if not is_ready:
+        set_multi_item_option_visible(False)
 
     if status_text is not None:
         status_label.config(text=status_text)
@@ -1164,6 +1188,7 @@ def download_video_gui():
         "audio_format": selected_audio_format.get().lower(),
         "cleanup_enabled": delete_temp_files.get(),
         "preserve_upload_date": preserve_upload_date.get(),
+        "group_multi_item": group_multi_item.get(),
         "media_title": media_info.get("title") if media_info else None,
         "upload_date": media_info.get("upload_date") if media_info else None,
         "bundle": media_info.get("bundle") if media_info else None,
@@ -1275,7 +1300,8 @@ def apply_media_info_results(request_id, url, media_info, error_message=None):
         set_resolution(preferred_resolution)
     apply_media_preview(media_info)
     item_count = media_info.get("item_count") or 1
-    ready_text = f"Ready to download {item_count} items." if item_count > 1 else "Ready to download."
+    set_multi_item_option_visible(bool(capabilities and capabilities.multi_item and item_count > 1))
+    ready_text = multi_item_ready_text(media_info)
     set_link_ready(True, ready_text)
 
 def fetch_media_info(url):
@@ -1310,7 +1336,9 @@ def update_ui_after_download(success, error_message=None, final_paths=None):
         if len(saved_paths) == 1:
             completion_message = f"File saved to:\n{saved_paths[0]}"
         else:
-            completion_message = f"{len(saved_paths)} files saved to:\n{output_directory}"
+            parent_paths = {os.path.dirname(path) for path in saved_paths}
+            saved_location = parent_paths.pop() if len(parent_paths) == 1 else output_directory
+            completion_message = f"{len(saved_paths)} files saved to:\n{saved_location}"
         messagebox.showinfo("Download Complete", completion_message)
         open_download_folder()
     else:
@@ -1341,6 +1369,7 @@ def download_video(download_settings, cancel_event):
             audio_format=download_settings["audio_format"],
             cleanup_enabled=download_settings["cleanup_enabled"],
             preserve_upload_date=download_settings["preserve_upload_date"],
+            group_multi_item=download_settings["group_multi_item"],
         )
         result = media_service.download(bundle, options, cancel_event, make_progress_hook(cancel_event))
         return True, None, tuple(str(path) for path in result.files)
@@ -1536,6 +1565,7 @@ except tk.TclError:
 
 delete_temp_files = tk.BooleanVar(value=bool(saved_settings.get("delete_temp_files", True)))
 preserve_upload_date = tk.BooleanVar(value=bool(saved_settings.get("preserve_upload_date", True)))
+group_multi_item = tk.BooleanVar(value=bool(saved_settings.get("group_multi_item", True)))
 audio_only = tk.BooleanVar(value=bool(saved_settings.get("audio_only", False)))
 saved_audio_format = saved_settings.get("audio_format")
 selected_audio_format = tk.StringVar(value=saved_audio_format if saved_audio_format in AUDIO_FORMATS else DEFAULT_AUDIO_FORMAT)
@@ -1726,6 +1756,16 @@ timestamp_checkbox = ttk.Checkbutton(
 )
 timestamp_checkbox.grid(row=0, column=1, sticky="w")
 ToolTip(timestamp_checkbox, "When enabled, downloaded files use the media's upload date for file timestamps. Turn it off to keep today's download time.")
+
+group_multi_item_checkbox = ttk.Checkbutton(
+    options_frame,
+    text="Put multiple items in one folder",
+    variable=group_multi_item,
+    command=toggle_group_multi_item,
+)
+group_multi_item_checkbox.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+group_multi_item_checkbox.grid_remove()
+ToolTip(group_multi_item_checkbox, "Shown for sources containing multiple media items. The preference is remembered.")
 ToolTip(test_link_button, "Insert a tiny test video link.")
 
 destination_frame = ttk.LabelFrame(main_frame, text="Destination", padding=10)

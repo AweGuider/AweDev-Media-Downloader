@@ -166,7 +166,8 @@ class InstagramAdapter(MediaAdapter):
                 )
 
             write_description_sidecar(staging_directory, base_name, bundle.description)
-            files = move_downloads(staging_directory, options.output_directory)
+            group_name = base_name if options.group_multi_item and len(item_media) > 1 else None
+            files = move_downloads(staging_directory, options.output_directory, group_name)
             finalize_downloads(files, bundle.upload_date, options.preserve_upload_date)
             return DownloadResult(files=files)
         finally:

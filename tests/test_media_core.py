@@ -11,7 +11,12 @@ from media_downloader.adapters.facebook import FacebookAdapter
 from media_downloader.adapters.ytdlp_video import YtDlpVideoAdapter
 from media_downloader.adapters.instagram import InstagramAdapter
 from media_downloader.adapters.tiktok import TikTokAdapter
-from media_downloader.files import sanitize_filename, unique_destination_path, write_description_sidecar
+from media_downloader.files import (
+    move_downloads,
+    sanitize_filename,
+    unique_destination_path,
+    write_description_sidecar,
+)
 
 
 class OptionsFactory:
@@ -104,15 +109,37 @@ class MediaCoreTests(unittest.TestCase):
                     audio_only=False,
                     preserve_upload_date=False,
                     cleanup_enabled=True,
+                    group_multi_item=True,
                 ),
                 cancel_event=threading.Event(),
             )
             self.assertEqual([path.suffix for path in result.files], [".jpg", ".mp4", ".txt"])
             self.assertTrue(all(path.exists() for path in result.files))
+            self.assertEqual({path.parent.name for path in result.files}, {"Instagram post by creator [ABC123]"})
             self.assertEqual(
                 next(path for path in result.files if path.suffix == ".txt").read_text(encoding="utf-8"),
                 fake_post.caption,
             )
+
+        self.assertEqual(
+            fake_loader.downloaded_urls,
+            ["https://cdn.example/first.jpg", "https://cdn.example/second.mp4"],
+        )
+
+        fake_loader.downloaded_urls.clear()
+        with tempfile.TemporaryDirectory() as temp_directory:
+            result = instagram.download(
+                bundle,
+                options=SimpleNamespace(
+                    output_directory=Path(temp_directory),
+                    audio_only=False,
+                    preserve_upload_date=False,
+                    cleanup_enabled=True,
+                    group_multi_item=False,
+                ),
+                cancel_event=threading.Event(),
+            )
+            self.assertEqual({path.parent for path in result.files}, {Path(temp_directory)})
 
         self.assertEqual(
             fake_loader.downloaded_urls,
@@ -237,12 +264,46 @@ class MediaCoreTests(unittest.TestCase):
                         audio_format="mp3",
                         preserve_upload_date=False,
                         cleanup_enabled=True,
+                        group_multi_item=True,
                     ),
                     cancel_event=threading.Event(),
                 )
 
             self.assertEqual([path.name for path in result.files], ["Test 100% video.mp4", "Test 100% video.txt"])
             self.assertEqual(result.files[1].read_text(encoding="utf-8"), bundle.description)
+
+    def test_grouped_downloads_use_unique_folders(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            output_directory = root / "output"
+
+            first_staging = root / "first"
+            first_staging.mkdir()
+            (first_staging / "post 01.jpg").write_bytes(b"first")
+            (first_staging / "post 02.mp4").write_bytes(b"second")
+            first_result = move_downloads(first_staging, output_directory, "Post")
+
+            second_staging = root / "second"
+            second_staging.mkdir()
+            (second_staging / "post 01.jpg").write_bytes(b"first")
+            (second_staging / "post 02.mp4").write_bytes(b"second")
+            second_result = move_downloads(second_staging, output_directory, "Post")
+
+            self.assertEqual({path.parent.name for path in first_result}, {"Post"})
+            self.assertEqual({path.parent.name for path in second_result}, {"Post (1)"})
+
+    def test_flat_downloads_remain_in_output_directory(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            staging_directory = root / "staging"
+            output_directory = root / "output"
+            staging_directory.mkdir()
+            (staging_directory / "post 01.jpg").write_bytes(b"first")
+            (staging_directory / "post 02.mp4").write_bytes(b"second")
+
+            result = move_downloads(staging_directory, output_directory)
+
+            self.assertEqual({path.parent for path in result}, {output_directory})
 
     def test_media_bundle_type_defaults_to_video(self):
         bundle = MediaBundle(provider=Provider.YOUTUBE, source_url="https://youtu.be/a", title="A")

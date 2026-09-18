@@ -165,7 +165,8 @@ class YtDlpVideoAdapter(MediaAdapter):
             with yt_dlp.YoutubeDL(self._options_factory(download_options)) as ydl:
                 ydl.download([bundle.source_url])
             write_description_sidecar(staging_directory, title, bundle.description)
-            files = move_downloads(staging_directory, options.output_directory)
+            group_name = title if options.group_multi_item and len(bundle.items) > 1 else None
+            files = move_downloads(staging_directory, options.output_directory, group_name)
             finalize_downloads(files, bundle.upload_date, options.preserve_upload_date)
             return DownloadResult(files=files)
         finally:

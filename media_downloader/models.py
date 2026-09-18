@@ -66,6 +66,7 @@ class DownloadOptions:
     audio_format: str = "mp3"
     cleanup_enabled: bool = True
     preserve_upload_date: bool = True
+    group_multi_item: bool = True
 
 
 @dataclass(frozen=True)

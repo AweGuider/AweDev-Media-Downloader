@@ -25,6 +25,18 @@ def unique_destination_path(directory: Path, filename: str) -> Path:
     return candidate
 
 
+def unique_destination_directory(directory: Path, name: str) -> Path:
+    name = sanitize_filename(name)
+    candidate = directory / name
+    counter = 1
+
+    while candidate.exists():
+        candidate = directory / f"{name} ({counter})"
+        counter += 1
+
+    return candidate
+
+
 def write_description_sidecar(
     staging_directory: Path,
     base_name: str,
@@ -41,7 +53,11 @@ def write_description_sidecar(
     return sidecar_path
 
 
-def move_downloads(staging_directory: Path, output_directory: Path) -> tuple[Path, ...]:
+def move_downloads(
+    staging_directory: Path,
+    output_directory: Path,
+    group_name: str | None = None,
+) -> tuple[Path, ...]:
     output_directory.mkdir(parents=True, exist_ok=True)
     files = sorted(
         path for path in staging_directory.iterdir()
@@ -50,9 +66,14 @@ def move_downloads(staging_directory: Path, output_directory: Path) -> tuple[Pat
     if not files:
         raise FileNotFoundError("The downloader did not produce an output file")
 
+    destination_directory = output_directory
+    if group_name:
+        destination_directory = unique_destination_directory(output_directory, group_name)
+        destination_directory.mkdir()
+
     destinations = []
     for source in files:
-        destination = unique_destination_path(output_directory, source.name)
+        destination = unique_destination_path(destination_directory, source.name)
         shutil.move(str(source), str(destination))
         destinations.append(destination)
     return tuple(destinations)
