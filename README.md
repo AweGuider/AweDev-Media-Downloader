@@ -14,7 +14,7 @@
 - Choose best available quality or a quality at or below the selected resolution.
 - Save repeated downloads with unique filenames.
 - Show dependency diagnostics for `yt-dlp`, `yt-dlp-ejs`, Instaloader, `curl-cffi`, JavaScript runtime support, `ffmpeg`, `ffprobe`, network access, and old PyInstaller temp folders.
-- Save user settings such as output folder, cleanup behavior, timestamp behavior, mode, and format.
+- Save user settings such as output folder, cleanup behavior, timestamp behavior, folder-opening behavior, mode, and format.
 - Open the project, issue tracker, and AweDev links from the in-app information dialog.
 
 ## Support AweDev

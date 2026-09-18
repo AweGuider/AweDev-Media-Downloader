@@ -153,6 +153,7 @@ def save_settings():
         "delete_temp_files": delete_temp_files.get(),
         "preserve_upload_date": preserve_upload_date.get(),
         "group_multi_item": group_multi_item.get(),
+        "open_folder_after_download": open_folder_after_download.get(),
     }
 
     try:
@@ -1340,7 +1341,8 @@ def update_ui_after_download(success, error_message=None, final_paths=None):
             saved_location = parent_paths.pop() if len(parent_paths) == 1 else output_directory
             completion_message = f"{len(saved_paths)} files saved to:\n{saved_location}"
         messagebox.showinfo("Download Complete", completion_message)
-        open_download_folder()
+        if open_folder_after_download.get():
+            open_download_folder()
     else:
         details = error_message or "Unknown error"
         status_label.config(text=f"Download failed\n{details}")
@@ -1566,6 +1568,7 @@ except tk.TclError:
 delete_temp_files = tk.BooleanVar(value=bool(saved_settings.get("delete_temp_files", True)))
 preserve_upload_date = tk.BooleanVar(value=bool(saved_settings.get("preserve_upload_date", True)))
 group_multi_item = tk.BooleanVar(value=bool(saved_settings.get("group_multi_item", True)))
+open_folder_after_download = tk.BooleanVar(value=bool(saved_settings.get("open_folder_after_download", True)))
 audio_only = tk.BooleanVar(value=bool(saved_settings.get("audio_only", False)))
 saved_audio_format = saved_settings.get("audio_format")
 selected_audio_format = tk.StringVar(value=saved_audio_format if saved_audio_format in AUDIO_FORMATS else DEFAULT_AUDIO_FORMAT)
@@ -1773,16 +1776,31 @@ destination_frame.grid(row=5, column=0, sticky="ew", pady=(12, 0))
 destination_frame.columnconfigure(0, weight=1)
 
 folder_label = ttk.Label(destination_frame, text=f"Save to: {output_directory}", wraplength=680)
-folder_label.grid(row=0, column=0, columnspan=3, sticky="ew")
+folder_label.grid(row=0, column=0, columnspan=2, sticky="ew")
 
-folder_button = ttk.Button(destination_frame, text="Choose Folder", command=select_output_folder)
-folder_button.grid(row=1, column=0, sticky="w", pady=(8, 0), padx=(0, 6))
+destination_left_actions = ttk.Frame(destination_frame)
+destination_left_actions.grid(row=1, column=0, sticky="w", pady=(8, 0))
 
-default_folder_button = ttk.Button(destination_frame, text="Use Downloads", command=reset_output_folder)
-default_folder_button.grid(row=1, column=1, sticky="w", pady=(8, 0), padx=(0, 6))
+folder_button = ttk.Button(destination_left_actions, text="Choose Folder", command=select_output_folder)
+folder_button.grid(row=0, column=0, padx=(0, 6))
 
-open_folder_button = ttk.Button(destination_frame, text="Open Folder", command=open_download_folder)
-open_folder_button.grid(row=1, column=2, sticky="w", pady=(8, 0))
+default_folder_button = ttk.Button(destination_left_actions, text="Use Downloads", command=reset_output_folder)
+default_folder_button.grid(row=0, column=1)
+
+destination_right_actions = ttk.Frame(destination_frame)
+destination_right_actions.grid(row=1, column=1, sticky="e", pady=(8, 0))
+
+open_folder_checkbox = ttk.Checkbutton(
+    destination_right_actions,
+    text="Open after download",
+    variable=open_folder_after_download,
+    command=save_settings,
+)
+open_folder_checkbox.grid(row=0, column=0, padx=(0, 8))
+ToolTip(open_folder_checkbox, "Open the destination folder after dismissing a successful download message.")
+
+open_folder_button = ttk.Button(destination_right_actions, text="Open Folder", command=open_download_folder)
+open_folder_button.grid(row=0, column=1)
 
 actions_frame = ttk.Frame(main_frame)
 actions_frame.grid(row=6, column=0, sticky="ew", pady=(14, 0))
