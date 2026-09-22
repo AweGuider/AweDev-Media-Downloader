@@ -39,7 +39,7 @@ if errorlevel 1 (
 if exist "ocr-component-stage" rmdir /s /q "ocr-component-stage"
 mkdir "ocr-component-stage"
 copy "dist\%WORKER_NAME%.exe" "ocr-component-stage\%WORKER_NAME%.exe" >nul
-powershell -NoProfile -Command "$data = [ordered]@{ component='awedev-ocr'; version='%COMPONENT_VERSION%'; protocol_version=1 }; $data | ConvertTo-Json | Set-Content -Encoding UTF8 'ocr-component-stage\component.json'"
+powershell -NoProfile -Command "$data = [ordered]@{ component='awedev-ocr'; version='%COMPONENT_VERSION%'; protocol_version=1 }; [IO.File]::WriteAllText('ocr-component-stage\component.json', ($data | ConvertTo-Json), [Text.UTF8Encoding]::new($false))"
 copy "LICENSE" "ocr-component-stage\LICENSE-AweDev.txt" >nul
 copy "THIRD_PARTY_NOTICES.md" "ocr-component-stage\THIRD_PARTY_NOTICES.md" >nul
 
@@ -63,7 +63,7 @@ echo Installed size: %INSTALLED_SIZE% bytes
 echo.
 set /p "RELEASE_TAG=GitHub release tag for this component (leave blank to skip manifest): "
 if not "%RELEASE_TAG%"=="" (
-    powershell -NoProfile -Command "$data = [ordered]@{ available=$true; version='%COMPONENT_VERSION%'; protocol_version=1; url='https://github.com/AweGuider/AweDev-Media-Downloader/releases/download/%RELEASE_TAG%/%OUTPUT_ZIP%'; sha256='%COMPONENT_SHA256%'; worker='%WORKER_NAME%.exe'; download_size=[long]%COMPONENT_SIZE%; installed_size=[long]%INSTALLED_SIZE% }; $data | ConvertTo-Json | Set-Content -Encoding UTF8 'assets\ocr-component.json'"
+    powershell -NoProfile -Command "$data = [ordered]@{ available=$true; version='%COMPONENT_VERSION%'; protocol_version=1; url='https://github.com/AweGuider/AweDev-Media-Downloader/releases/download/%RELEASE_TAG%/%OUTPUT_ZIP%'; sha256='%COMPONENT_SHA256%'; worker='%WORKER_NAME%.exe'; download_size=[long]%COMPONENT_SIZE%; installed_size=[long]%INSTALLED_SIZE% }; [IO.File]::WriteAllText('assets\ocr-component.json', ($data | ConvertTo-Json), [Text.UTF8Encoding]::new($false))"
     echo Wrote verified release manifest: assets\ocr-component.json
 )
 echo Upload the ZIP to the matching GitHub release before building the main application.

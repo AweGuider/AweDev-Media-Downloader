@@ -18,12 +18,12 @@ from media_downloader.ocr_postprocess import extract_visible_text
 from ocr_worker import format_timestamp, materially_different, normalize_lines, sidecar_path
 
 
-def component_archive(version="1.0.0", unsafe_name=None):
+def component_archive(version="1.0.0", unsafe_name=None, bom=False):
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as archive:
         archive.writestr(
             "component.json",
-            json.dumps({
+            ("\ufeff" if bom else "") + json.dumps({
                 "component": "awedev-ocr",
                 "version": version,
                 "protocol_version": 1,
@@ -87,6 +87,26 @@ class OcrComponentTests(unittest.TestCase):
             self.assertTrue(manager.worker_path.is_file())
             self.assertFalse(old_directory.exists())
             self.assertEqual(progress[-1], (len(payload), len(payload)))
+
+    def test_bom_marked_manifest_and_component_metadata_are_accepted(self):
+        payload = component_archive(bom=True)
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            manifest_path = root / "ocr-component.json"
+            manifest_path.write_text(
+                "\ufeff" + json.dumps(self.manifest(payload).__dict__),
+                encoding="utf-8",
+            )
+            manager = OcrComponentManager.from_manifest_path(
+                manifest_path,
+                "AweDevMediaDownloader",
+                component_root=root / "components",
+            )
+            manager._runner = lambda _command: SimpleNamespace(returncode=0, stdout="", stderr="")
+            manager.install(opener=lambda _request, timeout: FakeResponse(payload))
+
+            self.assertTrue(manager.manifest.available)
+            self.assertTrue(manager.is_installed())
 
     def test_checksum_failure_leaves_component_uninstalled(self):
         payload = component_archive()

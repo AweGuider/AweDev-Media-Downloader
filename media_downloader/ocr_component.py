@@ -38,7 +38,7 @@ class OcrComponentManifest:
     @classmethod
     def load(cls, path: Path):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             return cls()
 
@@ -118,7 +118,7 @@ class OcrComponentManager:
             return False
         metadata_path = self.install_directory / "component.json"
         try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             return False
         return (
@@ -279,7 +279,7 @@ class OcrComponentManager:
     def _validate_extracted_component(self, directory: Path):
         metadata_path = directory / "component.json"
         try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as error:
             raise OcrComponentError("The OCR component metadata is missing or invalid.") from error
         if (
@@ -296,7 +296,7 @@ class OcrComponentManager:
             if candidate in {active_directory, work_directory} or not candidate.is_dir():
                 continue
             try:
-                metadata = json.loads((candidate / "component.json").read_text(encoding="utf-8"))
+                metadata = json.loads((candidate / "component.json").read_text(encoding="utf-8-sig"))
             except (OSError, json.JSONDecodeError):
                 continue
             if metadata.get("component") == OCR_COMPONENT_NAME:
