@@ -63,6 +63,21 @@ def _video_format_for_resolution(resolution: str) -> str:
     return f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
 
 
+def _subtitle_language(info: dict) -> str | None:
+    preferred = str(info.get("language") or "").lower()
+    for tracks in (info.get("subtitles") or {}, info.get("automatic_captions") or {}):
+        languages = [str(language) for language in tracks if language != "live_chat"]
+        if not languages:
+            continue
+        if preferred:
+            for language in languages:
+                normalized = language.lower()
+                if normalized == preferred or normalized.split("-", 1)[0] == preferred.split("-", 1)[0]:
+                    return language
+        return languages[0]
+    return None
+
+
 class YtDlpVideoAdapter(MediaAdapter):
     def __init__(self, provider: Provider, supported_hosts, options_factory, display_name: str):
         self.provider = provider
@@ -82,6 +97,7 @@ class YtDlpVideoAdapter(MediaAdapter):
         item_infos = entries or [info]
         items = tuple(self._media_item(item_info, info) for item_info in item_infos)
         resolutions = {resolution for item in items for resolution in item.resolutions}
+        subtitle_language = _subtitle_language(info)
         title = info.get("title") or items[0].title or f"{self.display_name} video"
         return MediaBundle(
             provider=self.provider,
@@ -101,7 +117,9 @@ class YtDlpVideoAdapter(MediaAdapter):
                 audio_extraction=True,
                 quality_selection=bool(resolutions),
                 multi_item=len(items) > 1,
+                transcription=True,
             ),
+            subtitle_language=subtitle_language,
         )
 
     def _media_item(self, info: dict, parent: dict) -> MediaItem:
@@ -142,6 +160,13 @@ class YtDlpVideoAdapter(MediaAdapter):
             "concurrent_fragments": 5,
             "progress_hooks": [progress],
         }
+        if getattr(options, "create_transcript", False) and bundle.subtitle_language:
+            common_options.update({
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": [bundle.subtitle_language],
+                "subtitlesformat": "srt/vtt/best",
+            })
         if options.audio_only:
             download_options = {
                 **common_options,
@@ -169,7 +194,13 @@ class YtDlpVideoAdapter(MediaAdapter):
             group_name = title if options.group_multi_item and len(bundle.items) > 1 else None
             files = move_downloads(staging_directory, options.output_directory, group_name)
             finalize_downloads(files, bundle.upload_date, options.preserve_upload_date)
-            return DownloadResult(files=files)
+            transcript_sources = tuple(
+                path for path in files if path.suffix.lower() in {".srt", ".vtt"}
+            )
+            return DownloadResult(
+                files=tuple(path for path in files if path not in transcript_sources),
+                transcript_sources=transcript_sources,
+            )
         finally:
             if options.cleanup_enabled:
                 shutil.rmtree(staging_directory, ignore_errors=True)

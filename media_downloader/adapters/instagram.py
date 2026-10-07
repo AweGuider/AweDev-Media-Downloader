@@ -99,7 +99,10 @@ class InstagramAdapter(MediaAdapter):
             upload_date=upload_date,
             thumbnail_url=_first_thumbnail(item_media),
             items=items,
-            capabilities=DownloadCapabilities(multi_item=len(items) > 1),
+            capabilities=DownloadCapabilities(
+                multi_item=len(items) > 1,
+                transcription=any(item.media_type == MediaType.VIDEO for item in items),
+            ),
         )
 
     def _load_post(self, path: str):

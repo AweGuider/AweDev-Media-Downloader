@@ -49,6 +49,11 @@ from media_downloader.ocr_component import (
     OcrComponentManager,
 )
 from media_downloader.ocr_postprocess import extract_visible_text
+from media_downloader.transcription_component import (
+    TranscriptionComponentCancelled,
+    TranscriptionComponentManager,
+)
+from media_downloader.transcription_postprocess import create_transcripts
 
 ### Command to create .exe out of .py
 # python -m PyInstaller --onefile downloader.py
@@ -114,6 +119,8 @@ download_thread = None
 download_cancel_event = None
 ocr_install_thread = None
 ocr_install_cancel_event = None
+transcription_install_thread = None
+transcription_install_cancel_event = None
 is_closing = False
 ui_queue = queue.Queue()
 startup_diagnostic_results = None
@@ -150,8 +157,21 @@ def ocr_component_manifest_path():
         return release_manifest
     return app_resource_path("assets", "ocr-component.unavailable.json")
 
+def transcription_component_manifest_path():
+    configured_path = os.environ.get("AWEDEV_TRANSCRIPTION_COMPONENT_MANIFEST")
+    if configured_path:
+        return configured_path
+    release_manifest = app_resource_path("assets", "transcription-component.json")
+    if os.path.isfile(release_manifest):
+        return release_manifest
+    return app_resource_path("assets", "transcription-component.unavailable.json")
+
 ocr_component_manager = OcrComponentManager.from_manifest_path(
     Path(ocr_component_manifest_path()),
+    APP_ID,
+)
+transcription_component_manager = TranscriptionComponentManager.from_manifest_path(
+    Path(transcription_component_manifest_path()),
     APP_ID,
 )
 
@@ -176,6 +196,7 @@ def save_settings():
         "group_multi_item": group_multi_item.get(),
         "open_folder_after_download": open_folder_after_download.get(),
         "extract_visible_text": extract_visible_text_enabled.get(),
+        "create_transcript": create_transcript_enabled.get(),
     }
 
     try:
@@ -511,6 +532,19 @@ def run_startup_diagnostics():
         else "pass"
     )
     results.append(diagnostic(ocr_state, "Optional OCR component", ocr_status))
+    transcription_status = transcription_component_manager.status_text()
+    transcription_state = (
+        "warn"
+        if transcription_component_manager.manifest.available
+        and transcription_component_manager.install_directory.exists()
+        and not transcription_component_manager.is_installed()
+        else "pass"
+    )
+    results.append(diagnostic(
+        transcription_state,
+        "Optional transcription component",
+        transcription_status,
+    ))
     return results
 
 def format_diagnostics(results, media_health=()):
@@ -768,8 +802,12 @@ def process_ui_queue():
             update_ocr_install_progress(*args)
         elif action == "ocr_install_done":
             update_ui_after_ocr_install(*args)
+        elif action == "transcription_install_progress":
+            update_transcription_install_progress(*args)
+        elif action == "transcription_install_done":
+            update_ui_after_transcription_install(*args)
 
-    if not is_closing or download_is_active() or ocr_install_is_active():
+    if not is_closing or download_is_active() or ocr_install_is_active() or transcription_install_is_active():
         root.after(100, process_ui_queue)
 
 def queue_status(text):
@@ -780,6 +818,9 @@ def download_is_active():
 
 def ocr_install_is_active():
     return ocr_install_thread is not None and ocr_install_thread.is_alive()
+
+def transcription_install_is_active():
+    return transcription_install_thread is not None and transcription_install_thread.is_alive()
 
 def set_download_button_enabled(enabled):
     if "download_button" in globals():
@@ -943,14 +984,14 @@ def update_ui_after_ocr_install(success, error_message=None):
             and error_message != "OCR component installation cancelled."
         ):
             messagebox.showerror("OCR Installation Failed", error_message)
-    if is_closing and not download_is_active():
+    if is_closing and not download_is_active() and not transcription_install_is_active():
         root.destroy()
         return
     update_ocr_component_controls()
     run_startup_diagnostics_async()
 
 def remove_ocr_component():
-    if download_is_active() or ocr_install_is_active():
+    if download_is_active() or ocr_install_is_active() or transcription_install_is_active():
         messagebox.showwarning("OCR Component Busy", "Wait for the current operation to finish first.")
         return
     if not messagebox.askyesno(
@@ -968,11 +1009,152 @@ def remove_ocr_component():
     update_ocr_component_controls()
     run_startup_diagnostics_async()
 
+def update_transcription_component_controls():
+    if "transcription_component_status_label" not in globals():
+        return
+    installed = transcription_component_manager.is_installed()
+    transcription_component_status_label.config(text=transcription_component_manager.status_text())
+    if transcription_install_is_active():
+        remove_transcription_component_button.grid_remove()
+        cancel_transcription_install_button.grid()
+    elif installed:
+        remove_transcription_component_button.grid()
+        cancel_transcription_install_button.grid_remove()
+    else:
+        remove_transcription_component_button.grid_remove()
+        cancel_transcription_install_button.grid_remove()
+    capabilities = latest_media_info.get("capabilities") if latest_media_info else None
+    transcription_supported = not capabilities or capabilities.transcription
+    controls_enabled = (
+        not transcription_install_is_active()
+        and not download_is_active()
+        and transcription_supported
+    )
+    create_transcript_checkbox.config(state=tk.NORMAL if controls_enabled else tk.DISABLED)
+    remove_transcription_component_button.config(state=tk.NORMAL if controls_enabled else tk.DISABLED)
+
+def cancel_transcription_component_install():
+    if transcription_install_cancel_event:
+        transcription_install_cancel_event.set()
+        transcription_component_status_label.config(text="Canceling transcription component installation...")
+        cancel_transcription_install_button.config(state=tk.DISABLED)
+
+def toggle_transcription():
+    global transcription_install_thread, transcription_install_cancel_event
+    if not create_transcript_enabled.get():
+        save_settings()
+        update_transcription_component_controls()
+        return
+    if transcription_component_manager.is_installed():
+        save_settings()
+        update_transcription_component_controls()
+        return
+
+    create_transcript_enabled.set(False)
+    if not transcription_component_manager.manifest.available:
+        messagebox.showinfo(
+            "Transcription Component Unavailable",
+            "This app build does not include a verified transcription component download.\n\n"
+            "Install a newer release when the optional component is published.",
+        )
+        update_transcription_component_controls()
+        return
+
+    confirmed = messagebox.askyesno(
+        "Download Optional Transcription Component",
+        "Speech transcription requires the optional local transcription component.\n\n"
+        f"{transcription_component_manager.size_summary()}\n\n"
+        "The component is downloaded from this project's GitHub Releases page. "
+        "Speech recognition runs locally after installation.\n\n"
+        "Download and enable it now?",
+    )
+    if not confirmed:
+        update_transcription_component_controls()
+        return
+
+    transcription_install_cancel_event = threading.Event()
+    transcription_component_status_label.config(text="Downloading transcription component...")
+    create_transcript_checkbox.config(state=tk.DISABLED)
+    remove_transcription_component_button.config(state=tk.DISABLED)
+
+    def worker():
+        try:
+            transcription_component_manager.install(
+                progress=lambda downloaded, total: queue_ui(
+                    "transcription_install_progress", downloaded, total,
+                ),
+                cancel_event=transcription_install_cancel_event,
+            )
+            queue_ui("transcription_install_done", True, None)
+        except Exception as error:
+            queue_ui("transcription_install_done", False, str(error))
+
+    transcription_install_thread = threading.Thread(target=worker, daemon=True)
+    transcription_install_thread.start()
+    update_transcription_component_controls()
+
+def update_transcription_install_progress(downloaded, total):
+    if total:
+        percent = min(100, int(downloaded * 100 / total))
+        transcription_component_status_label.config(text=f"Downloading transcription component... {percent}%")
+    else:
+        transcription_component_status_label.config(
+            text=f"Downloading transcription component... {downloaded // (1024 * 1024)} MB"
+        )
+
+def update_ui_after_transcription_install(success, error_message=None):
+    global transcription_install_thread, transcription_install_cancel_event
+    transcription_install_thread = None
+    transcription_install_cancel_event = None
+    cancel_transcription_install_button.config(state=tk.NORMAL)
+    if success:
+        create_transcript_enabled.set(True)
+        save_settings()
+        if not is_closing:
+            messagebox.showinfo(
+                "Transcription Component Installed",
+                "The optional transcription component was installed and speech transcription is now enabled.",
+            )
+    else:
+        create_transcript_enabled.set(False)
+        save_settings()
+        if (
+            not is_closing
+            and error_message
+            and error_message != "Transcription component installation cancelled."
+        ):
+            messagebox.showerror("Transcription Installation Failed", error_message)
+    if is_closing and not download_is_active() and not ocr_install_is_active():
+        root.destroy()
+        return
+    update_transcription_component_controls()
+    run_startup_diagnostics_async()
+
+def remove_transcription_component():
+    if download_is_active() or transcription_install_is_active():
+        messagebox.showwarning("Transcription Component Busy", "Wait for the current operation to finish first.")
+        return
+    if not messagebox.askyesno(
+        "Remove Transcription Component",
+        "Remove the optional transcription component and reclaim its disk space?",
+    ):
+        return
+    try:
+        transcription_component_manager.remove()
+    except OSError as error:
+        messagebox.showerror("Could Not Remove Transcription Component", str(error))
+        return
+    create_transcript_enabled.set(False)
+    save_settings()
+    update_transcription_component_controls()
+    run_startup_diagnostics_async()
+
 def set_link_ready(is_ready, status_text=None):
     global url_ready_for_download
     url_ready_for_download = is_ready
     set_download_button_enabled(is_ready and not download_is_active())
     set_quality_state(is_ready)
+    update_transcription_component_controls()
     if not is_ready:
         set_multi_item_option_visible(False)
 
@@ -1056,6 +1238,7 @@ def toggle_audio_mode():
         resolution_dropdown.grid()
     set_quality_state(url_ready_for_download)
     update_ocr_component_controls()
+    update_transcription_component_controls()
     save_settings()
 
 def clean_text(text):
@@ -1369,6 +1552,10 @@ def download_video_gui():
         "preserve_upload_date": preserve_upload_date.get(),
         "group_multi_item": group_multi_item.get(),
         "extract_visible_text": extract_visible_text_enabled.get(),
+        "create_transcript": (
+            create_transcript_enabled.get()
+            and bool(media_info and getattr(media_info.get("capabilities"), "transcription", False))
+        ),
         "media_title": media_info.get("title") if media_info else None,
         "upload_date": media_info.get("upload_date") if media_info else None,
         "bundle": media_info.get("bundle") if media_info else None,
@@ -1386,6 +1573,7 @@ def download_video_gui():
     )
     download_thread.start()
     update_ocr_component_controls()
+    update_transcription_component_controls()
 
 def update_resolution_options(*args):
     """Debounces media metadata fetching while the URL is being edited."""
@@ -1507,14 +1695,14 @@ def update_ui_after_download(success, error_message=None, final_paths=None, warn
     download_thread = None
     download_cancel_event = None
 
-    if is_closing and not ocr_install_is_active():
+    if is_closing and not ocr_install_is_active() and not transcription_install_is_active():
         root.destroy()
         return
     if is_closing:
         return
 
     if success:
-        status_label.config(text="Download complete" if not warning_message else "Download complete with OCR warning")
+        status_label.config(text="Download complete" if not warning_message else "Download complete with a processing warning")
         saved_paths = list(final_paths or [])
         if len(saved_paths) == 1:
             completion_message = f"File saved to:\n{saved_paths[0]}"
@@ -1523,7 +1711,7 @@ def update_ui_after_download(success, error_message=None, final_paths=None, warn
             saved_location = parent_paths.pop() if len(parent_paths) == 1 else output_directory
             completion_message = f"{len(saved_paths)} files saved to:\n{saved_location}"
         if warning_message:
-            completion_message += f"\n\nVisible-text extraction was skipped:\n{warning_message}"
+            completion_message += f"\n\nPost-processing warning:\n{warning_message}"
             messagebox.showwarning("Download Complete", completion_message)
         else:
             messagebox.showinfo("Download Complete", completion_message)
@@ -1537,6 +1725,7 @@ def update_ui_after_download(success, error_message=None, final_paths=None, warn
 
     set_download_button_enabled(url_ready_for_download)
     update_ocr_component_controls()
+    update_transcription_component_controls()
 
 def download_video(download_settings, cancel_event):
     """Downloads inspected media through its registered provider adapter."""
@@ -1559,10 +1748,11 @@ def download_video(download_settings, cancel_event):
             cleanup_enabled=download_settings["cleanup_enabled"],
             preserve_upload_date=download_settings["preserve_upload_date"],
             group_multi_item=download_settings["group_multi_item"],
+            create_transcript=download_settings.get("create_transcript", False),
         )
         result = media_service.download(bundle, options, cancel_event, make_progress_hook(cancel_event))
         output_files = tuple(result.files)
-        warning_message = None
+        warning_messages = []
         if download_settings.get("extract_visible_text"):
             queue_status("Extracting visible text...")
             try:
@@ -1577,7 +1767,35 @@ def download_video(download_settings, cancel_event):
             except OcrComponentCancelled:
                 raise DownloadCancelled("Download cancelled")
             except Exception as error:
-                warning_message = clean_text(str(error)) or error.__class__.__name__
+                warning_messages.append(
+                    f"Visible-text extraction: {clean_text(str(error)) or error.__class__.__name__}"
+                )
+        if download_settings.get("create_transcript"):
+            queue_status("Creating speech transcript...")
+            try:
+                transcription_result = create_transcripts(
+                    transcription_component_manager,
+                    output_files,
+                    source_files=result.transcript_sources,
+                    cancel_event=cancel_event,
+                )
+                output_files += transcription_result.outputs
+                warning_messages.extend(
+                    f"Transcription: {warning}" for warning in transcription_result.warnings
+                )
+            except TranscriptionComponentCancelled:
+                warning_messages.append("Transcription was cancelled; downloaded media was kept.")
+            except Exception as error:
+                warning_messages.append(
+                    f"Transcription: {clean_text(str(error)) or error.__class__.__name__}"
+                )
+            finally:
+                for source_path in result.transcript_sources:
+                    try:
+                        source_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+        warning_message = "\n".join(warning_messages) or None
         return True, None, tuple(str(path) for path in output_files), warning_message
 
     except DownloadCancelled as e:
@@ -1720,12 +1938,14 @@ def on_close():
 
     save_settings()
 
-    if download_is_active() or ocr_install_is_active():
+    if download_is_active() or ocr_install_is_active() or transcription_install_is_active():
         is_closing = True
         if download_cancel_event:
             download_cancel_event.set()
         if ocr_install_cancel_event:
             ocr_install_cancel_event.set()
+        if transcription_install_cancel_event:
+            transcription_install_cancel_event.set()
         status_label.config(text="Canceling active work and cleaning up...")
         download_button.config(state=tk.DISABLED)
         return
@@ -1779,6 +1999,14 @@ ocr_setting_was_reset = bool(saved_settings.get("extract_visible_text", False)) 
 extract_visible_text_enabled = tk.BooleanVar(
     value=bool(saved_settings.get("extract_visible_text", False))
     and ocr_component_manager.is_installed()
+)
+transcription_setting_was_reset = (
+    bool(saved_settings.get("create_transcript", False))
+    and not transcription_component_manager.is_installed()
+)
+create_transcript_enabled = tk.BooleanVar(
+    value=bool(saved_settings.get("create_transcript", False))
+    and transcription_component_manager.is_installed()
 )
 audio_only = tk.BooleanVar(value=bool(saved_settings.get("audio_only", False)))
 saved_audio_format = saved_settings.get("audio_format")
@@ -2020,6 +2248,44 @@ cancel_ocr_install_button = ttk.Button(
 )
 cancel_ocr_install_button.grid(row=0, column=3, sticky="e")
 
+transcription_frame = ttk.Frame(options_frame)
+transcription_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+transcription_frame.columnconfigure(1, weight=1)
+
+create_transcript_checkbox = ttk.Checkbutton(
+    transcription_frame,
+    text="Create speech transcript",
+    variable=create_transcript_enabled,
+    command=toggle_transcription,
+)
+create_transcript_checkbox.grid(row=0, column=0, sticky="w", padx=(0, 8))
+ToolTip(
+    create_transcript_checkbox,
+    "Creates timestamped .transcript.txt files. Source subtitles are preferred; otherwise speech is recognized locally.",
+)
+
+transcription_component_status_label = ttk.Label(
+    transcription_frame,
+    text=transcription_component_manager.status_text(),
+    foreground="#5f6368",
+    font=("Segoe UI", 8),
+)
+transcription_component_status_label.grid(row=0, column=1, sticky="w")
+
+remove_transcription_component_button = ttk.Button(
+    transcription_frame,
+    text="Remove component",
+    command=remove_transcription_component,
+)
+remove_transcription_component_button.grid(row=0, column=2, sticky="e")
+
+cancel_transcription_install_button = ttk.Button(
+    transcription_frame,
+    text="Cancel",
+    command=cancel_transcription_component_install,
+)
+cancel_transcription_install_button.grid(row=0, column=3, sticky="e")
+
 destination_frame = ttk.LabelFrame(main_frame, text="Destination", padding=10)
 destination_frame.grid(row=5, column=0, sticky="ew", pady=(12, 0))
 destination_frame.columnconfigure(0, weight=1)
@@ -2150,7 +2416,8 @@ reset_media_preview()
 toggle_audio_mode()
 set_link_ready(False)
 update_ocr_component_controls()
-if ocr_setting_was_reset:
+update_transcription_component_controls()
+if ocr_setting_was_reset or transcription_setting_was_reset:
     save_settings()
 root.protocol("WM_DELETE_WINDOW", on_close)
 process_ui_queue()

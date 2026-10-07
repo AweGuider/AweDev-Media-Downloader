@@ -1,0 +1,10 @@
+{
+  "available": true,
+  "version": "1.0.0",
+  "protocol_version": 1,
+  "url": "https://github.com/AweGuider/AweDev-Media-Downloader/releases/download/RELEASE_TAG/AweDevMediaTranscription-windows-x64-1.0.0.zip",
+  "sha256": "REPLACE_WITH_ARCHIVE_SHA256",
+  "worker": "AweDevMediaTranscription.exe",
+  "download_size": 0,
+  "installed_size": 0
+}

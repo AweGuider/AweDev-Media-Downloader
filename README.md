@@ -16,6 +16,7 @@
 - Show dependency diagnostics for `yt-dlp`, `yt-dlp-ejs`, Instaloader, `curl-cffi`, JavaScript runtime support, `ffmpeg`, `ffprobe`, network access, and old PyInstaller temp folders.
 - Save user settings such as output folder, cleanup behavior, timestamp behavior, folder-opening behavior, mode, and format.
 - Optionally extract visible text into `.ocr.txt` sidecars through a separately downloaded OCR component.
+- Optionally create timestamped `.transcript.txt` sidecars from source subtitles or local speech recognition.
 - Open the project, issue tracker, and AweDev links from the in-app information dialog.
 
 ## Support AweDev
@@ -38,6 +39,8 @@ The first public release target is Windows. The source may run on other platform
 The release EXE is intended to include the needed Python app package, thumbnail preview support, `ffmpeg`, `ffprobe`, and a JavaScript runtime used by `yt-dlp`.
 
 Visible-text extraction is an optional component and is not bundled into the main EXE. When a release provides a verified OCR component, enabling **Extract visible text from media** offers to download it from this project's GitHub Releases page. The component is stored under `%LOCALAPPDATA%\AweDevMediaDownloader\components\ocr`, and OCR processing stays local. Disabling OCR leaves the component installed; use **Remove component** to reclaim its disk space.
+
+Speech transcription is also an optional component and is not bundled into the main EXE. Enabling **Create speech transcript** offers to download the verified component when one is published. The app prefers source subtitles when available and otherwise runs `whisper.cpp` locally. The component is stored under `%LOCALAPPDATA%\AweDevMediaDownloader\components\transcription`; downloaded media is not uploaded for transcription.
 
 ## Run From Source
 
@@ -108,6 +111,24 @@ build_ocr_component.bat
 
 The script builds and self-tests `AweDevMediaOCR.exe`, packages it with its component metadata, and calculates the ZIP's SHA-256 and sizes. Enter the planned release tag when prompted to generate `assets\ocr-component.json`, upload the ZIP to that version-specific GitHub release, and then build the main application so it embeds the verified manifest. Publish the release as immutable after both assets are attached.
 
+## Build The Optional Transcription Component
+
+Prepare `transcription-runtime` with:
+
+- the Windows x64 CPU build of `whisper-cli.exe` and its required DLLs;
+- multilingual `ggml-base-q5_1.bin`;
+- `ggml-silero-v6.2.0.bin` for voice activity detection;
+- `LICENSE-whisper.cpp.txt`, `LICENSE-Whisper-model.txt`, and `LICENSE-Silero-VAD.txt` from the exact downloaded distributions.
+
+Install the build dependency and run the component builder:
+
+```bat
+python -m pip install -r requirements-transcription-build.txt
+build_transcription_component.bat
+```
+
+The builder packages and self-tests the worker, `whisper.cpp`, models, and notices; calculates archive sizes and SHA-256; and can generate `assets\transcription-component.json` for a version-specific GitHub release. Upload that ZIP before building the main application.
+
 ## Troubleshooting
 
 - If diagnostics says `yt-dlp` is outdated, update the package in source builds or download a newer app release.
@@ -122,6 +143,7 @@ The script builds and self-tests `AweDevMediaOCR.exe`, packages it with its comp
 
 - One URL at a time.
 - No playlist or batch downloads in the first release.
+- Transcription does not identify speakers, translate speech, or summarize the transcript.
 - No DRM or copyright bypassing.
 - Supported sites and `yt-dlp` behavior can change, so some failures may require dependency updates or a new app release.
 - Instagram authentication and private media are not supported. Public availability can still vary because Instagram rate-limits automated requests.

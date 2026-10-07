@@ -27,3 +27,6 @@ Thumbs.db
 build_log*.txt
 ocr-component-stage/
 /assets/ocr-component.json
+transcription-component-stage/
+transcription-runtime/
+/assets/transcription-component.json

@@ -277,6 +277,51 @@ class MediaCoreTests(unittest.TestCase):
             )
             self.assertEqual(result.files[1].read_text(encoding="utf-8"), bundle.description)
 
+    def test_ytdlp_transcript_download_requests_source_subtitles(self):
+        captured_options = {}
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                captured_options.update(options)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def download(self, _urls):
+                output_path = captured_options["outtmpl"].replace("%%", "%").replace("%(ext)s", "mp4")
+                Path(output_path).write_bytes(b"test media")
+
+        bundle = MediaBundle(
+            provider=Provider.YOUTUBE,
+            source_url="https://youtu.be/example",
+            title="Captioned video",
+            subtitle_language="de",
+            items=(MediaItem(media_id="abc123", media_type=MediaType.VIDEO, title="Captioned video"),),
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            with patch("media_downloader.adapters.ytdlp_video.yt_dlp.YoutubeDL", FakeYoutubeDL):
+                self.youtube.download(
+                    bundle,
+                    options=SimpleNamespace(
+                        output_directory=Path(temp_directory),
+                        resolution="Highest Available",
+                        audio_only=False,
+                        audio_format="mp3",
+                        preserve_upload_date=False,
+                        cleanup_enabled=True,
+                        group_multi_item=True,
+                        create_transcript=True,
+                    ),
+                    cancel_event=threading.Event(),
+                )
+
+        self.assertTrue(captured_options["writesubtitles"])
+        self.assertTrue(captured_options["writeautomaticsub"])
+        self.assertEqual(captured_options["subtitleslangs"], ["de"])
+
     def test_media_output_stem_preserves_unique_id_for_long_titles(self):
         stem = media_output_stem("A" * 180, "unique-id")
 

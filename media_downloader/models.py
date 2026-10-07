@@ -21,6 +21,7 @@ class DownloadCapabilities:
     audio_extraction: bool = False
     quality_selection: bool = False
     multi_item: bool = False
+    transcription: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class MediaBundle:
     items: tuple[MediaItem, ...] = ()
     capabilities: DownloadCapabilities = field(default_factory=DownloadCapabilities)
     description: str | None = None
+    subtitle_language: str | None = None
 
     @property
     def media_type(self):
@@ -67,8 +69,10 @@ class DownloadOptions:
     cleanup_enabled: bool = True
     preserve_upload_date: bool = True
     group_multi_item: bool = True
+    create_transcript: bool = False
 
 
 @dataclass(frozen=True)
 class DownloadResult:
     files: tuple[Path, ...]
+    transcript_sources: tuple[Path, ...] = ()

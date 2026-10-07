@@ -22,7 +22,10 @@ This project can package third-party tools so the Windows EXE works without a lo
 | `ffmpeg` / `ffprobe` | Bundled into the release EXE by `build_exe_latest.bat` when found on `PATH`. | FFmpeg is usually LGPL, but builds configured with GPL options are GPL. If using the Gyan.dev full build shown in local testing, treat the bundled FFmpeg binaries as GPL-covered and include the license files/notices from that exact distribution. |
 | Deno | Preferred JavaScript runtime bundled by `build_exe_latest.bat` when available. | MIT license. Include Deno's license text or notice when bundling the binary. |
 | Node.js | Fallback JavaScript runtime bundled by `build_exe_latest.bat` when Deno is unavailable. | MIT license for Node.js plus notices for included third-party dependencies. Include Node's license file/notices when bundling the binary. |
+| `whisper.cpp` | CPU speech-recognition runtime used only by the separately distributed optional transcription component. | MIT license. Include the license from the exact packaged release. |
+| OpenAI Whisper model weights | Multilingual `base` model converted and quantized for `whisper.cpp`. | MIT license. Include the Whisper model license with the component. |
+| Silero VAD model | Voice activity detection used before Whisper inference. | MIT license. Include the model project's license with the component. |
 
 ## Release Requirement
 
-Before attaching a ZIP or EXE to a public GitHub release, include the third-party license files/notices that match the exact bundled binaries. This matters most for `ffmpeg`/`ffprobe`, because the license obligations depend on the build configuration. The optional OCR ZIP must also include the RapidOCR, PaddleOCR model, ONNX Runtime, and transitive dependency notices produced by its final build environment.
+Before attaching a ZIP or EXE to a public GitHub release, include the third-party license files/notices that match the exact bundled binaries. This matters most for `ffmpeg`/`ffprobe`, because the license obligations depend on the build configuration. The optional OCR ZIP must also include the RapidOCR, PaddleOCR model, ONNX Runtime, and transitive dependency notices produced by its final build environment. The optional transcription ZIP must include the exact `whisper.cpp`, Whisper model, Silero VAD, and binary dependency notices.
