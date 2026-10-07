@@ -102,9 +102,10 @@ Build output is organized by purpose:
 - `build\` contains disposable PyInstaller work files and package staging; successful builders remove their own temporary directories.
 - `dist\app\<version>\` and `dist\components\...` contain raw compiled executables for local testing.
 - `release\app\<version>\` and `release\components\...` contain ZIP packages and `SHA256SUMS.txt` files ready for GitHub Releases.
+- `archive\` preserves superseded, legacy, staging, and test artifacts that no longer belong in active build output.
 - `logs\build\` contains timestamped build logs.
 
-All generated build output is ignored by Git. Builders use separate app, OCR, and transcription subdirectories so their intermediates cannot overwrite one another.
+All generated build output and the local archive are ignored by Git. Builders use separate app, OCR, and transcription subdirectories so their intermediates cannot overwrite one another.
 
 ## Build The Optional OCR Component
 
