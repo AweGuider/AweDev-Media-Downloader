@@ -132,7 +132,7 @@ about_window = None
 # For future implementation of stable progress UI update
 latest_progress = {"percent": "0%", "speed": "N/A", "eta": "Unknown"}
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 STALE_MEI_AGE_SECONDS = 24 * 60 * 60
 JS_RUNTIME_CANDIDATES = (
     ("deno", "deno", (2, 3, 0), True),
