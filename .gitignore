@@ -13,6 +13,8 @@ venv/
 # Ignore PyInstaller build files
 build/
 dist/
+release/
+logs/build/
 *.spec
 
 # Ignore system-specific files

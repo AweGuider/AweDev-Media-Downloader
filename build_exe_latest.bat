@@ -1,136 +1,175 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableExtensions EnableDelayedExpansion
 
 title AweDev Media Downloader Build Script
 
+cd /d "%~dp0"
+
 set "SOURCE=downloader.py"
 set "ICON_PATH=assets\app.ico"
+set "PROJECT_ROOT=%CD%"
 
-:: === Prompt for App Name ===
-set /p "FILE_NAME=Enter executable name (default: AweDevMediaDownloader): "
-if "%FILE_NAME%"=="" set "FILE_NAME=AweDevMediaDownloader"
-
-:: === Prompt for ZIP Name ===
-set /p "ZIP_NAME=Enter ZIP archive name (default: %FILE_NAME%-Build.zip): "
-if "%ZIP_NAME%"=="" set "ZIP_NAME=%FILE_NAME%-Build.zip"
-
-:: === Ask About Overwriting Existing Files ===
-set /p "OVERWRITE=Overwrite existing files if they exist? (y/n): "
-set "OVERWRITE=!OVERWRITE:~0,1!"
-
-:: === Ask if user wants to zip the build (default: yes) ===
-set /p "DO_ZIP=Zip the executable after building? (y/n): "
-if /i "!DO_ZIP!"=="n" (
-    set "DO_ZIP=false"
-) else (
-    set "DO_ZIP=true"
-)
-
-:: === Create timestamp for log file ===
-for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-mm-ss"') do set "LOG_TIMESTAMP=%%i"
-
-:: === Paths ===
-set "EXE_PATH=dist\%FILE_NAME%.exe"
-set "LOG_FILE=build_log_!LOG_TIMESTAMP!.txt"
-
-if not exist "%SOURCE%" (
-    echo Source file not found: %SOURCE%
+for /f "tokens=3" %%V in ('findstr /b /c:"APP_VERSION = " "%SOURCE%"') do set "APP_VERSION=%%~V"
+if not defined APP_VERSION (
+    echo Could not read APP_VERSION from %SOURCE%.
     pause
     exit /b 1
 )
 
-if not exist "%ICON_PATH%" (
-    echo App icon not found: %ICON_PATH%
+set "DEFAULT_FILE_NAME=AweDevMediaDownloader_v%APP_VERSION%"
+set "DEFAULT_ZIP_BASE=AweDevMediaDownloader-v%APP_VERSION%-windows-x64"
+set "RELEASE_NOTES=docs\release-notes\v%APP_VERSION%.md"
+set "BUILD_ROOT=build\app"
+set "BUILD_WORK_DIR=%BUILD_ROOT%\work"
+set "BUILD_SPEC_DIR=%BUILD_ROOT%\spec"
+set "DIST_DIR=dist\app\%APP_VERSION%"
+set "STAGE_DIR=build\package-stage\app\%APP_VERSION%"
+set "RELEASE_DIR=release\app\%APP_VERSION%"
+set "LOG_DIR=logs\build"
+
+echo Detected app version: %APP_VERSION%
+echo.
+
+set "FILE_NAME=%DEFAULT_FILE_NAME%"
+set "FILE_INPUT="
+set /p "FILE_INPUT=Executable name [%DEFAULT_FILE_NAME%]: "
+if defined FILE_INPUT set "FILE_NAME=!FILE_INPUT!"
+if /i "!FILE_NAME:~-4!"==".exe" set "FILE_NAME=!FILE_NAME:~0,-4!"
+set "NAME_TO_VALIDATE=!FILE_NAME!"
+call :validate_name
+if errorlevel 1 (
+    echo Invalid executable name: !FILE_NAME!
     pause
     exit /b 1
 )
+
+set "DO_ZIP=true"
+set "DO_ZIP_INPUT="
+set /p "DO_ZIP_INPUT=Create ZIP package? [Y/n]: "
+if /i "!DO_ZIP_INPUT:~0,1!"=="n" set "DO_ZIP=false"
+
+if "!DO_ZIP!"=="true" (
+    set "ZIP_BASE=%DEFAULT_ZIP_BASE%"
+    set "ZIP_INPUT="
+    set /p "ZIP_INPUT=ZIP name without .zip [%DEFAULT_ZIP_BASE%]: "
+    if defined ZIP_INPUT set "ZIP_BASE=!ZIP_INPUT!"
+    if /i "!ZIP_BASE:~-4!"==".zip" set "ZIP_BASE=!ZIP_BASE:~0,-4!"
+    set "NAME_TO_VALIDATE=!ZIP_BASE!"
+    call :validate_name
+    if errorlevel 1 (
+        echo Invalid ZIP name: !ZIP_BASE!
+        pause
+        exit /b 1
+    )
+    set "ZIP_NAME=!ZIP_BASE!.zip"
+    set "ZIP_PATH=%RELEASE_DIR%\!ZIP_NAME!"
+)
+
+set "EXE_PATH=%DIST_DIR%\!FILE_NAME!.exe"
+
+echo.
+echo Build plan:
+echo   EXE: !EXE_PATH!
+if "!DO_ZIP!"=="true" (
+    echo   ZIP: !ZIP_PATH!
+    echo   Package files: EXE, README.md, LICENSE, THIRD_PARTY_NOTICES.md, RELEASE_NOTES.md
+)
+echo.
+set "CONTINUE_INPUT="
+set /p "CONTINUE_INPUT=Continue? [Y/n]: "
+if /i "!CONTINUE_INPUT:~0,1!"=="n" exit /b 0
+
+for %%F in ("%SOURCE%" "%ICON_PATH%" "README.md" "LICENSE" "THIRD_PARTY_NOTICES.md" "%RELEASE_NOTES%") do (
+    if not exist "%%~F" (
+        echo Required file not found: %%~F
+        pause
+        exit /b 1
+    )
+)
+
+call :validate_component_manifest "assets\ocr-component.json"
+if errorlevel 1 exit /b 1
+call :validate_component_manifest "assets\transcription-component.json"
+if errorlevel 1 exit /b 1
+
+if exist "!EXE_PATH!" (
+    set "OVERWRITE_EXE="
+    set /p "OVERWRITE_EXE=Executable already exists. Overwrite? [y/N]: "
+    if /i not "!OVERWRITE_EXE:~0,1!"=="y" (
+        echo Build cancelled; existing executable was preserved.
+        exit /b 1
+    )
+)
+
+if "!DO_ZIP!"=="true" if exist "!ZIP_PATH!" (
+    set "OVERWRITE_ZIP="
+    set /p "OVERWRITE_ZIP=ZIP already exists. Overwrite? [Y/n]: "
+    if /i "!OVERWRITE_ZIP:~0,1!"=="n" (
+        echo Build cancelled; existing ZIP was preserved.
+        exit /b 1
+    )
+)
+
+for %%D in ("%BUILD_WORK_DIR%" "%BUILD_SPEC_DIR%" "%DIST_DIR%" "%LOG_DIR%") do if not exist "%%~D" mkdir "%%~D"
+if "!DO_ZIP!"=="true" if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
+
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-mm-ss-fff"') do set "LOG_TIMESTAMP=%%I"
+set "LOG_FILE=%LOG_DIR%\app-!LOG_TIMESTAMP!.txt"
 
 echo Checking Python build prerequisites...
-python -c "import tkinter as tk; tk.Tcl(); import curl_cffi; import instaloader; import yt_dlp; import yt_dlp_ejs; import PIL; import PyInstaller" >> "%LOG_FILE%" 2>&1
+python -c "import tkinter as tk; tk.Tcl(); import curl_cffi; import instaloader; import yt_dlp; import yt_dlp_ejs; import PIL; import PyInstaller" >> "!LOG_FILE!" 2>&1
 if errorlevel 1 (
     echo Python build prerequisite check failed. Check !LOG_FILE! for details.
-    echo Repair Python Tcl/Tk support or use a Python install with working Tkinter, then rerun this script.
+    echo Repair Python Tcl/Tk support or use a Python installation with working Tkinter, then rerun this script.
     pause
     exit /b 1
 )
 
 call :resolve_tool ffmpeg FFMPEG_PATH
-if errorlevel 1 (
-    echo ffmpeg was not found.
-    goto missing_prerequisite
-)
-
+if errorlevel 1 goto missing_prerequisite
 call :resolve_tool ffprobe FFPROBE_PATH
-if errorlevel 1 (
-    echo ffprobe was not found.
-    goto missing_prerequisite
-)
+if errorlevel 1 goto missing_prerequisite
 
 set "JS_RUNTIME_NAME="
 set "JS_RUNTIME_PATH="
-
 call :resolve_tool deno DENO_PATH
 if not errorlevel 1 (
     call :is_readable "!DENO_PATH!"
     if not errorlevel 1 (
         set "JS_RUNTIME_NAME=deno"
         set "JS_RUNTIME_PATH=!DENO_PATH!"
-    ) else (
-        echo deno was found but cannot be read by PyInstaller: !DENO_PATH!
-        echo Falling back to node...
     )
 )
-
 if not defined JS_RUNTIME_PATH (
     call :resolve_tool node NODE_PATH
-    if errorlevel 1 (
-        echo deno was not bundleable and node was not found.
-        goto missing_prerequisite
-    )
-
+    if errorlevel 1 goto missing_prerequisite
     call :is_readable "!NODE_PATH!"
-    if errorlevel 1 (
-        echo node was found but cannot be read by PyInstaller: !NODE_PATH!
-        goto missing_prerequisite
-    )
-
+    if errorlevel 1 goto missing_prerequisite
     set "JS_RUNTIME_NAME=node"
     set "JS_RUNTIME_PATH=!NODE_PATH!"
 )
 
-echo Runtime tools for release build:
-echo   ffmpeg:     %FFMPEG_PATH%
-echo   ffprobe:    %FFPROBE_PATH%
-echo   JS runtime: %JS_RUNTIME_NAME% at %JS_RUNTIME_PATH%
+echo Runtime tools:
+echo   ffmpeg:     !FFMPEG_PATH!
+echo   ffprobe:    !FFPROBE_PATH!
+echo   JS runtime: !JS_RUNTIME_NAME! at !JS_RUNTIME_PATH!
 echo.
+echo Building executable...
 
-echo Cleaning previous logs...
-:: === Optional: Keep only last 5 logs, delete older ===
-for /f "skip=5 delims=" %%F in ('dir /b /o-d build_log_*.txt 2^>nul') do del "%%F"
-
-:: === Remove existing EXE if overwrite allowed ===
-if exist "%EXE_PATH%" (
-    if /i "%OVERWRITE%"=="y" (
-        del /q "%EXE_PATH%"
-        echo Removed existing EXE >> "%LOG_FILE%"
-    ) else (
-        call :generate_unique_name
-    )
-)
-
-:: === RUN PYINSTALLER ===
-echo Building executable: %FILE_NAME%.exe...
 python -m PyInstaller ^
     --clean ^
     --noconfirm ^
     --onefile ^
     --windowed ^
-    --name "%FILE_NAME%" ^
-    --icon "%ICON_PATH%" ^
-    --add-data "assets;assets" ^
-    --add-binary "%FFMPEG_PATH%;." ^
-    --add-binary "%FFPROBE_PATH%;." ^
-    --add-binary "%JS_RUNTIME_PATH%;." ^
+    --name "!FILE_NAME!" ^
+    --icon "%PROJECT_ROOT%\%ICON_PATH%" ^
+    --workpath "%BUILD_WORK_DIR%" ^
+    --specpath "%BUILD_SPEC_DIR%" ^
+    --distpath "%DIST_DIR%" ^
+    --add-data "%PROJECT_ROOT%\assets;assets" ^
+    --add-binary "!FFMPEG_PATH!;." ^
+    --add-binary "!FFPROBE_PATH!;." ^
+    --add-binary "!JS_RUNTIME_PATH!;." ^
     --hidden-import yt_dlp_ejs ^
     --collect-data yt_dlp_ejs ^
     --collect-submodules yt_dlp_ejs ^
@@ -139,105 +178,78 @@ python -m PyInstaller ^
     --copy-metadata yt-dlp-ejs ^
     --copy-metadata instaloader ^
     --copy-metadata curl-cffi ^
-    "%SOURCE%" >> "%LOG_FILE%" 2>&1
-
+    "%PROJECT_ROOT%\%SOURCE%" >> "!LOG_FILE!" 2>&1
 if errorlevel 1 (
-    echo Build failed! Check !LOG_FILE! for details.
+    echo Build failed. Check !LOG_FILE! for details.
     pause
     exit /b 1
 )
 
-echo Build complete: !EXE_PATH! >> "%LOG_FILE%"
-echo Build complete: !EXE_PATH!
+for /f %%H in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath '!EXE_PATH!').Hash.ToLower()"') do set "EXE_SHA256=%%H"
 
-:: === ZIP Handling ===
 if "!DO_ZIP!"=="true" (
-    if exist "!ZIP_NAME!" (
-        if /i "!OVERWRITE!"=="y" (
-            del /q "!ZIP_NAME!"
-            echo Overwriting ZIP: !ZIP_NAME!
-        ) else (
-            call :generate_unique_zip_name
-        )
-    )
+    if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
+    mkdir "%STAGE_DIR%"
+    copy "!EXE_PATH!" "%STAGE_DIR%\!FILE_NAME!.exe" >nul
+    copy "README.md" "%STAGE_DIR%\README.md" >nul
+    copy "LICENSE" "%STAGE_DIR%\LICENSE" >nul
+    copy "THIRD_PARTY_NOTICES.md" "%STAGE_DIR%\THIRD_PARTY_NOTICES.md" >nul
+    copy "%RELEASE_NOTES%" "%STAGE_DIR%\RELEASE_NOTES.md" >nul
 
-    echo Zipping !EXE_PATH! build into !ZIP_NAME!...
-    tar -a -cf "!ZIP_NAME!" -C "dist" "!FILE_NAME!.exe" >> "!LOG_FILE!" 2>&1
+    if exist "!ZIP_PATH!" del /q "!ZIP_PATH!"
+    set "ZIP_SOURCE=%STAGE_DIR%"
+    set "ZIP_DESTINATION=!ZIP_PATH!"
+    powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory([IO.Path]::GetFullPath($env:ZIP_SOURCE), [IO.Path]::GetFullPath($env:ZIP_DESTINATION), [IO.Compression.CompressionLevel]::Optimal, $false)" >> "!LOG_FILE!" 2>&1
     if errorlevel 1 (
-        echo Zip creation failed! Keeping built executable at !EXE_PATH!.
+        echo ZIP creation failed. The executable remains at !EXE_PATH!.
         echo Check !LOG_FILE! for details.
         pause
         exit /b 1
     )
-
-    echo Removing executable after zipping...
-    del /q "!EXE_PATH!" >> "!LOG_FILE!"
-    set "OUTPUT_PATH=!ZIP_NAME!"
-) else (
-    echo Skipping ZIP. Keeping built .exe
-    set "OUTPUT_PATH=!EXE_PATH!"
+    for /f %%H in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath '!ZIP_PATH!').Hash.ToLower()"') do set "ZIP_SHA256=%%H"
+    powershell -NoProfile -Command "[IO.File]::WriteAllText('%RELEASE_DIR%\SHA256SUMS.txt','!ZIP_SHA256!  !ZIP_NAME!' + [Environment]::NewLine,[Text.UTF8Encoding]::new($false))"
 )
 
-:: === CLEAN UP ===
-echo Cleaning up...
-rmdir /s /q build >> "%LOG_FILE%" 2>&1
-del /q *.spec >> "%LOG_FILE%" 2>&1
-echo Cleaned up temporary build files
+if exist "%BUILD_ROOT%" rmdir /s /q "%BUILD_ROOT%"
+if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
 
-echo Done. Output file: !OUTPUT_PATH!
-echo See %LOG_FILE% for build log.
+echo.
+echo Build complete.
+echo   EXE: !EXE_PATH!
+echo   EXE SHA-256: !EXE_SHA256!
+if "!DO_ZIP!"=="true" (
+    echo   ZIP: !ZIP_PATH!
+    echo   ZIP SHA-256: !ZIP_SHA256!
+    echo   Checksums: %RELEASE_DIR%\SHA256SUMS.txt
+)
+echo   Log: !LOG_FILE!
 pause
 exit /b 0
 
+:validate_name
+powershell -NoProfile -Command "$name=$env:NAME_TO_VALIDATE; if ([string]::IsNullOrWhiteSpace($name) -or $name.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) { exit 1 }"
+exit /b %errorlevel%
+
+:validate_component_manifest
+if not exist "%~1" exit /b 0
+powershell -NoProfile -Command "$path='%~1'; try { $m=Get-Content -LiteralPath $path -Raw | ConvertFrom-Json; if (-not $m.available -or $m.protocol_version -ne 1 -or $m.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or $m.url -notmatch '^https://github.com/AweGuider/AweDev-Media-Downloader/releases/download/') { throw 'invalid release manifest' }; if ($m.url -match '(?i)(?:^|[-_/])(rc|preview|beta)[0-9-]*(?:[-_/]|$)') { Write-Warning ($path + ' still points to a pre-release URL: ' + $m.url) } } catch { Write-Host ('Invalid component manifest ' + $path + ': ' + $_.Exception.Message); exit 1 }"
+exit /b %errorlevel%
+
 :missing_prerequisite
-echo Missing release build prerequisite.
-echo Install ffmpeg/ffprobe and a bundleable JavaScript runtime, such as node or deno.
-echo Ensure they are discoverable by PATH or PowerShell Get-Command, then rerun this script.
+echo Missing or unreadable release build prerequisite.
+echo Ensure ffmpeg, ffprobe, and Node or Deno are available, then rerun this script.
 pause
 exit /b 1
 
-:: === Helper: Resolve a tool from PATH or PowerShell command discovery ===
 :resolve_tool
 set "%~2="
-for /f "delims=" %%I in ('where %~1 2^>nul') do (
-    if not defined %~2 set "%~2=%%I"
-)
+for /f "delims=" %%I in ('where %~1 2^>nul') do if not defined %~2 set "%~2=%%I"
 if not defined %~2 (
-    for /f "delims=" %%I in ('powershell -NoProfile -Command "$cmd = Get-Command -Name '%~1' -ErrorAction SilentlyContinue; if ($cmd) { $cmd.Source }" 2^>nul') do (
-        if not defined %~2 set "%~2=%%I"
-    )
+    for /f "delims=" %%I in ('powershell -NoProfile -Command "$cmd = Get-Command -Name '%~1' -ErrorAction SilentlyContinue; if ($cmd) { $cmd.Source }" 2^>nul') do if not defined %~2 set "%~2=%%I"
 )
 if not defined %~2 exit /b 1
 exit /b 0
 
-:: === Helper: Verify PyInstaller can read a binary path ===
 :is_readable
 powershell -NoProfile -Command "try { $s=[IO.File]::Open('%~1',[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); $s.Dispose(); exit 0 } catch { exit 1 }"
 exit /b %errorlevel%
-
-:: === Helper: Generate Unique EXE Name ===
-:generate_unique_name
-set COUNT=1
-:try_exe_name
-set "ALT_NAME=%FILE_NAME%_v!COUNT!"
-set "EXE_PATH=dist\!ALT_NAME!.exe"
-if exist "!EXE_PATH!" (
-    set /a COUNT+=1
-    goto try_exe_name
-)
-set "FILE_NAME=!ALT_NAME!"
-echo Using new EXE name: !FILE_NAME!
-goto :eof
-
-:: === Helper: Generate Unique ZIP Name ===
-:generate_unique_zip_name
-set COUNT=1
-:try_zip_name
-set "ALT_ZIP=%ZIP_NAME:~0,-4%_v!COUNT!.zip"
-if exist "!ALT_ZIP!" (
-    set /a COUNT+=1
-    goto try_zip_name
-)
-set "ZIP_NAME=!ALT_ZIP!"
-echo Using new ZIP name: !ZIP_NAME!
-goto :eof

@@ -93,7 +93,18 @@ Then run:
 build_exe_latest.bat
 ```
 
-The build script asks for an EXE name, ZIP name, overwrite behavior, and whether to create a ZIP. Generated EXEs, ZIPs, logs, PyInstaller output, and `.spec` files are ignored by Git.
+The builder reads `APP_VERSION` from `downloader.py` and uses it in the default EXE and ZIP names. It asks whether to create a ZIP before asking for its name; enter the ZIP name without `.zip`. Existing EXEs default to preserve, while existing ZIP packages default to overwrite.
+
+When ZIP packaging is enabled, the archive contains the EXE, `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and the matching release notes as `RELEASE_NOTES.md`.
+
+Build output is organized by purpose:
+
+- `build\` contains disposable PyInstaller work files and package staging; successful builders remove their own temporary directories.
+- `dist\app\<version>\` and `dist\components\...` contain raw compiled executables for local testing.
+- `release\app\<version>\` and `release\components\...` contain ZIP packages and `SHA256SUMS.txt` files ready for GitHub Releases.
+- `logs\build\` contains timestamped build logs.
+
+All generated build output is ignored by Git. Builders use separate app, OCR, and transcription subdirectories so their intermediates cannot overwrite one another.
 
 ## Build The Optional OCR Component
 
@@ -109,7 +120,7 @@ Then run:
 build_ocr_component.bat
 ```
 
-The script builds and self-tests `AweDevMediaOCR.exe`, packages it with its component metadata, and calculates the ZIP's SHA-256 and sizes. Enter the planned release tag when prompted to generate `assets\ocr-component.json`, upload the ZIP to that version-specific GitHub release, and then build the main application so it embeds the verified manifest. Publish the release as immutable after both assets are attached.
+The script builds and self-tests `AweDevMediaOCR.exe`, packages it with its component metadata, and writes its ZIP and checksum under `release\components\ocr\<version>\`. Enter the planned release tag when prompted to generate `assets\ocr-component.json`, upload that exact ZIP to the matching GitHub release, and then build the main application so it embeds the verified manifest. Publish the release as immutable only after every asset is attached.
 
 ## Build The Optional Transcription Component
 
@@ -127,7 +138,7 @@ python -m pip install -r requirements-transcription-build.txt
 build_transcription_component.bat
 ```
 
-The builder packages and self-tests the worker, `whisper.cpp`, models, and notices; calculates archive sizes and SHA-256; and can generate `assets\transcription-component.json` for a version-specific GitHub release. Upload that ZIP before building the main application.
+The builder packages and self-tests the worker, `whisper.cpp`, models, and notices; writes its ZIP and checksum under `release\components\transcription\<version>\`; and can generate `assets\transcription-component.json` for a version-specific GitHub release. Upload that exact ZIP before building the main application.
 
 ## Troubleshooting
 
