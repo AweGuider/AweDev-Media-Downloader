@@ -185,7 +185,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
-for /f %%H in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath '!EXE_PATH!').Hash.ToLower()"') do set "EXE_SHA256=%%H"
+set "EXE_HASH_FILE=%BUILD_ROOT%\exe-sha256.tmp"
+powershell -NoProfile -Command "$stream=[IO.File]::OpenRead([IO.Path]::GetFullPath('!EXE_PATH!')); try { $sha=[Security.Cryptography.SHA256]::Create(); $hash=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','').ToLowerInvariant(); [IO.File]::WriteAllText([IO.Path]::GetFullPath('!EXE_HASH_FILE!'), $hash, [Text.UTF8Encoding]::new($false)) } finally { if ($sha) { $sha.Dispose() }; $stream.Dispose() }"
+if errorlevel 1 (
+    echo Failed to calculate the executable checksum.
+    exit /b 1
+)
+set /p "EXE_SHA256="<"!EXE_HASH_FILE!"
+del /q "!EXE_HASH_FILE!"
 
 if "!DO_ZIP!"=="true" (
     if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
@@ -206,7 +213,14 @@ if "!DO_ZIP!"=="true" (
         pause
         exit /b 1
     )
-    for /f %%H in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath '!ZIP_PATH!').Hash.ToLower()"') do set "ZIP_SHA256=%%H"
+    set "ZIP_HASH_FILE=%BUILD_ROOT%\zip-sha256.tmp"
+    powershell -NoProfile -Command "$stream=[IO.File]::OpenRead([IO.Path]::GetFullPath('!ZIP_PATH!')); try { $sha=[Security.Cryptography.SHA256]::Create(); $hash=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','').ToLowerInvariant(); [IO.File]::WriteAllText([IO.Path]::GetFullPath('!ZIP_HASH_FILE!'), $hash, [Text.UTF8Encoding]::new($false)) } finally { if ($sha) { $sha.Dispose() }; $stream.Dispose() }"
+    if errorlevel 1 (
+        echo Failed to calculate the ZIP checksum.
+        exit /b 1
+    )
+    set /p "ZIP_SHA256="<"!ZIP_HASH_FILE!"
+    del /q "!ZIP_HASH_FILE!"
     powershell -NoProfile -Command "[IO.File]::WriteAllText('%RELEASE_DIR%\SHA256SUMS.txt','!ZIP_SHA256!  !ZIP_NAME!' + [Environment]::NewLine,[Text.UTF8Encoding]::new($false))"
 )
 
